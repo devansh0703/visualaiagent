@@ -1,0 +1,106 @@
+/**
+ * Message + event type constants shared by background, content scripts and UI.
+ * Content scripts cannot import ES modules, so keep the protocol simple and
+ * stable. These strings are the single source of truth.
+ */
+
+export const MSG = {
+  HELLO: 'vaia:hello',
+  EVENT: 'vaia:event',
+  EVENT_BATCH: 'vaia:event_batch',
+  PING: 'vaia:ping',
+  PONG: 'vaia:pong',
+  STATE: 'vaia:state',
+  GET_STATE: 'vaia:get_state',
+  SET_MODE: 'vaia:set_mode',
+  SCAN_PAGE: 'vaia:scan_page',
+  PAGE_SUMMARY: 'vaia:page_summary',
+  CAPTURE_NOW: 'vaia:capture_now',
+  CAPTURED: 'vaia:captured',
+  HEATMAP: 'vaia:heatmap',
+  RECORD: 'vaia:record',
+  CONFIG_UPDATED: 'vaia:config_updated',
+  SESSION_END: 'vaia:session_end',
+  INSIGHT: 'vaia:insight',
+  METRICS: 'vaia:metrics',
+  TEST_CONNECTION: 'vaia:test_connection',
+  TEST_RESULT: 'vaia:test_result',
+  EXPORT: 'vaia:export',
+  CLEAR_DATA: 'vaia:clear_data',
+  FLUSH_NOW: 'vaia:flush_now',
+  OPEN_DASHBOARD: 'vaia:open_dashboard',
+};
+
+/** High-level telemetry event kinds emitted by the tracker. */
+export const ET = {
+  PAGE_VIEW: 'page_view',
+  PAGE_LEAVE: 'page_leave',
+  CLICK: 'click',
+  DOUBLE_CLICK: 'double_click',
+  RIGHT_CLICK: 'right_click',
+  MOUSE_DOWN: 'mouse_down',
+  MOUSE_UP: 'mouse_up',
+  MOUSE_MOVE: 'mouse_move',
+  DRAG: 'drag',
+  KEY_DOWN: 'key_down',
+  KEY_UP: 'key_up',
+  TEXT_INPUT: 'text_input',
+  PASTE: 'paste',
+  COPY: 'copy',
+  CUT: 'cut',
+  FOCUS: 'focus',
+  BLUR: 'blur',
+  SCROLL: 'scroll',
+  WHEEL: 'wheel',
+  TOUCH: 'touch',
+  NAVIGATION: 'navigation',
+  TAB_ACTIVATED: 'tab_activated',
+  TAB_CLOSED: 'tab_closed',
+  TAB_CREATED: 'tab_created',
+  TAB_UPDATED: 'tab_updated',
+  FORM_SUBMIT: 'form_submit',
+  FILE_DOWNLOAD: 'file_download',
+  RAGE_CLICK: 'rage_click',
+  DEAD_CLICK: 'dead_click',
+  IDLE_START: 'idle_start',
+  IDLE_END: 'idle_end',
+  ERROR: 'error',
+  UNHANDLED_REJECTION: 'unhandled_rejection',
+  CONSOLE_ERROR: 'console_error',
+  RESOURCE_ERROR: 'resource_error',
+  PERFORMANCE: 'performance',
+  DOM_CHANGE: 'dom_change',
+  VISIBILITY: 'visibility',
+  FULLSCREEN: 'fullscreen',
+  NETWORK: 'network',
+  SELECTION: 'selection',
+  SCREENSHOT: 'screenshot',
+  SESSION_START: 'session_start',
+  SESSION_END: 'session_end',
+  INSIGHT: 'insight',
+  CONFIDENCE: 'confidence',
+  SEARCH: 'search',
+  PRINT: 'print',
+  FIND: 'find',
+};
+
+/** Signal flags attached to events for AI/heuristic post-processing. */
+export const SIG = {
+  SENSITIVE: 'sensitive',
+  AUTOFILL: 'autofill',
+  SHORTCUT: 'shortcut',
+  HESITATION: 'hesitation',
+  RAPID: 'rapid',
+  NEGATIVE: 'negative',
+  CANCELLED: 'cancelled',
+  PASSIVE: 'passive',
+};
+
+export const MODES = {
+  MONITOR: 'monitor',
+  PAUSED: 'paused',
+};
+
+export const CH = {
+  PORT: 'vaia-port',
+};

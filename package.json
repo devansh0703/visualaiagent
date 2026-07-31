@@ -1,0 +1,19 @@
+{
+  "name": "visual-ai-agent",
+  "version": "0.1.0",
+  "description": "A Visual AI Agent Chrome extension: monitors the browser screen and user activity, analyzes it with vision LLMs, and streams telemetry to your database.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/unit/",
+    "e2e": "node test/e2e/run.mjs",
+    "server": "node server/server.mjs",
+    "icons": "node tools/gen-icons.mjs"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^24.0.0"
+  }
+}
