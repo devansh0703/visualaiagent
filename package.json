@@ -6,6 +6,7 @@
   "license": "MIT",
   "scripts": {
     "test": "node --test test/unit/",
+    "test:integration": "node --test test/integration/",
     "e2e": "node test/e2e/run.mjs",
     "server": "node server/server.mjs",
     "icons": "node tools/gen-icons.mjs"

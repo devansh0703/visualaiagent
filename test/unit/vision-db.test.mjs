@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { extractJSON, dataUrlParts, analyze } from '../../background/vision.js';
 import { baseOf } from '../../background/db.js';
+import { visionProviders, defaultModels } from '../../shared/config.js';
 
 test('extractJSON parses fenced JSON', () => {
   const out = extractJSON('```json\n{"a":1}\n```');
@@ -46,4 +47,19 @@ test('baseOf derives screenshot endpoint base', () => {
   assert.equal(baseOf('https://h/api/events/'), 'https://h/api');
   assert.equal(baseOf('https://h/'), 'https://h');
   assert.equal(baseOf(''), '');
+});
+
+test('groq is a registered vision provider with a default model', () => {
+  const providers = visionProviders();
+  const groq = providers.find((p) => p.id === 'groq');
+  assert.ok(groq, 'groq provider should be registered');
+  assert.equal(groq.needsKey, true);
+  assert.ok(defaultModels().groq, 'groq should have a default model');
+});
+
+test('every provider in visionProviders() has a default model', () => {
+  const models = defaultModels();
+  for (const p of visionProviders()) {
+    assert.ok(models[p.id], `missing default model for ${p.id}`);
+  }
 });

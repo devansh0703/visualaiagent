@@ -93,15 +93,17 @@ function extractJSON(text) {
 
 /* ------------------------------ providers ------------------------------ */
 
-async function openaiCompatible({ model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs }) {
+async function openaiCompatible({ model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, responseFormat = true }) {
   const url = (baseUrl || 'https://api.openai.com/v1') + '/chat/completions';
   const body = {
     model,
     messages,
     temperature: temperature ?? 0.2,
     max_tokens: maxTokens || 1024,
-    response_format: { type: 'json_object' },
   };
+  // response_format: json_object is not reliably supported by every
+  // OpenAI-compatible endpoint (notably Groq vision models), so it's opt-out.
+  if (responseFormat) body.response_format = { type: 'json_object' };
   const { json } = await fetchJson(
     url,
     {
@@ -269,6 +271,18 @@ export async function analyze({ config, context }) {
           temperature: vision.temperature,
           maxTokens: vision.maxTokens,
           timeoutMs: vision.timeoutMs,
+        });
+        break;
+      case 'groq':
+        text = await openaiCompatible({
+          model,
+          baseUrl: vision.baseUrl || 'https://api.groq.com/openai/v1',
+          apiKey: vision.apiKey,
+          messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: userContent }],
+          temperature: vision.temperature,
+          maxTokens: vision.maxTokens,
+          timeoutMs: vision.timeoutMs,
+          responseFormat: false,
         });
         break;
       case 'mock':
