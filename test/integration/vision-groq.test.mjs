@@ -76,15 +76,28 @@ function tinyPngDataUrl(width = 32, height = 32, [r, g, b] = [0, 120, 215]) {
 }
 
 test('groq provider analyzes a screenshot with a real API key', { skip: !API_KEY ? 'GROQ_API_KEY not set — skipping live provider test' : false }, async () => {
-  const result = await analyze({
-    config: { vision: { provider: 'groq', apiKey: API_KEY, enabled: true } },
-    context: {
-      url: 'https://example.com',
-      title: 'Integration test',
-      dataUrl: tinyPngDataUrl(),
-      recentEvents: [{ type: 'click', summary: 'clicked login' }],
-    },
-  });
+  // Groq's free on_demand tier is token-rate-limited and vision requests are
+  // token-heavy, so use a small output budget and retry on 429.
+  const run = () =>
+    analyze({
+      config: { vision: { provider: 'groq', apiKey: API_KEY, enabled: true, maxTokens: 1024 } },
+      context: {
+        url: 'https://example.com',
+        title: 'Integration test',
+        dataUrl: tinyPngDataUrl(),
+        recentEvents: [{ type: 'click', summary: 'clicked login' }],
+      },
+    });
+  let result;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      result = await run();
+      break;
+    } catch (e) {
+      if (!/429/.test(e.message) || attempt === 3) throw e;
+      await new Promise((r) => setTimeout(r, 25000));
+    }
+  }
   assert.equal(result.provider, 'groq');
   assert.ok(result.summary, 'should have a summary');
   assert.ok(typeof result.raw?.screen?.summary === 'string');

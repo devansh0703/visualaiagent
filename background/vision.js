@@ -29,7 +29,8 @@ Analyze the screenshot and return STRICT JSON (no markdown) with this exact sche
   "promptInjection": {"detected": false, "detail": ""},
   "recommendations": ["concrete next actions for the user"],
   "privacy": {"sensitiveVisible": false}
-}`;
+}
+Do NOT output a thinking/reasoning block. Output ONLY the JSON object and nothing else.`;
 
 function dataUrlParts(dataUrl) {
   const m = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl || '');
@@ -93,11 +94,21 @@ function extractJSON(text) {
 
 /* ------------------------------ providers ------------------------------ */
 
+/** OpenAI-compatible APIs expect parts typed 'image_url', not Anthropic's 'image'. */
+function normalizeOpenAiContent(content) {
+  if (!Array.isArray(content)) return content;
+  return content.map((c) => {
+    if (c.type === 'image') return { type: 'image_url', image_url: c.image_url };
+    if (c.type === 'text') return { type: 'text', text: c.text };
+    return c;
+  });
+}
+
 async function openaiCompatible({ model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, responseFormat = true }) {
   const url = (baseUrl || 'https://api.openai.com/v1') + '/chat/completions';
   const body = {
     model,
-    messages,
+    messages: (messages || []).map((m) => ({ ...m, content: normalizeOpenAiContent(m.content) })),
     temperature: temperature ?? 0.2,
     max_tokens: maxTokens || 1024,
   };
