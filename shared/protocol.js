@@ -13,6 +13,9 @@ export const MSG = {
   STATE: 'vaia:state',
   GET_STATE: 'vaia:get_state',
   SET_MODE: 'vaia:set_mode',
+  SAVE_CONFIG: 'vaia:save_config',
+  GET_CONFIG: 'vaia:get_config',
+  RESET_CONFIG: 'vaia:reset_config',
   SCAN_PAGE: 'vaia:scan_page',
   PAGE_SUMMARY: 'vaia:page_summary',
   CAPTURE_NOW: 'vaia:capture_now',
@@ -29,6 +32,12 @@ export const MSG = {
   CLEAR_DATA: 'vaia:clear_data',
   FLUSH_NOW: 'vaia:flush_now',
   OPEN_DASHBOARD: 'vaia:open_dashboard',
+  GET_EVENTS: 'vaia:get_events',
+  GET_SESSIONS: 'vaia:get_sessions',
+  GET_INSIGHTS: 'vaia:get_insights',
+  GET_SCREENSHOTS: 'vaia:get_screenshots',
+  GET_SCREENSHOT: 'vaia:get_screenshot',
+  GET_STATS: 'vaia:get_stats',
 };
 
 /** High-level telemetry event kinds emitted by the tracker. */

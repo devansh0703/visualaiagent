@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Visual AI Agent</title>
+  <link rel="stylesheet" href="../ui.css" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="row">
+    <img src="../../icons/icon48.png" width="26" height="26" alt="logo" />
+    <div class="grow">
+      <h1>Visual AI Agent</h1>
+      <div class="row" style="gap:6px">
+        <span class="dot pulse" id="statusDot"></span>
+        <span class="muted" id="statusText">connecting…</span>
+      </div>
+    </div>
+    <button class="ghost pill-btn" id="btnOptions" title="Options">⚙</button>
+  </header>
+
+  <div id="scanModal" class="scan-modal hidden">
+    <div class="scan-box card">
+      <div class="row">
+        <h3>Page scan</h3>
+        <button class="ghost" id="scanClose" style="margin-left:auto">✕</button>
+      </div>
+      <div id="scanBody" class="muted">Scanning…</div>
+    </div>
+  </div>
+
+  <div class="grid grid4 stats-grid" id="stats"></div>
+
+  <div class="card">
+    <h3>Session</h3>
+    <div class="row wrap" style="gap:6px">
+      <span class="tag mono" id="sessionId">—</span>
+      <span class="tag" id="sessionStart">started —</span>
+      <span class="tag" id="sessionDuration">—</span>
+    </div>
+    <h3 style="margin-top:10px">Recent pages</h3>
+    <div class="col" id="pages" style="font-size:12px"></div>
+  </div>
+
+  <div class="card">
+    <h3>Database sync</h3>
+    <div class="row wrap" id="dbStatus">
+      <span class="tag mono" id="dbEndpoint">no endpoint</span>
+      <span class="tag" id="dbFlush">—</span>
+      <span class="tag mono" id="dbQueue">—</span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnFlush" class="ghost pill-btn">Flush now</button>
+      <button id="btnExport" class="ghost pill-btn">Export JSON</button>
+    </div>
+  </div>
+
+  <div class="row" style="margin-top:4px">
+    <button id="btnPause" class="primary grow">Pause monitoring</button>
+    <button id="btnCapture" class="grow">Capture</button>
+    <button id="btnScan" class="grow">Scan page</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button id="btnDashboard" class="grow">Open dashboard</button>
+  </div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

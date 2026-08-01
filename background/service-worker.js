@@ -410,6 +410,25 @@ async function handleMessage(msg, sender, sendResponse) {
       sendResponse({ ok: true, mode });
       return;
     }
+    case MSG.GET_CONFIG: {
+      sendResponse({ config });
+      return;
+    }
+    case MSG.SAVE_CONFIG: {
+      await saveConfig(msg.config || {});
+      sendResponse({ ok: true, config });
+      return;
+    }
+    case MSG.RESET_CONFIG: {
+      config = normalizeConfig({});
+      config.identity = { userId: '', device: config.identity?.device || '' };
+      await storage.storageSet({ [storage.K.CONFIG]: config });
+      await broadcastConfig();
+      applyConfigEffects();
+      refreshState();
+      sendResponse({ ok: true, config });
+      return;
+    }
     case MSG.CAPTURE_NOW: {
       const rec = await capture.captureNow({ tabId: msg.tabId || session?.tabId, reason: 'manual', session, config: getConfig(), onAnalyze: onAnalyzeScreenshot });
       sendResponse({ ok: !!rec, id: rec && rec.id });
@@ -468,6 +487,45 @@ async function handleMessage(msg, sender, sendResponse) {
       sendResponse({ ok: true });
       return;
     }
+    case MSG.GET_EVENTS: {
+      sendResponse({ events: await queryEvents(msg) });
+      return;
+    }
+    case MSG.GET_SESSIONS: {
+      const out = [];
+      await idb.each('sessions', { index: 'ts', direction: 'prev', limit: msg.limit || 50, onEach: (r) => out.push(r) });
+      sendResponse({ sessions: out });
+      return;
+    }
+    case MSG.GET_INSIGHTS: {
+      const out = [];
+      await idb.each('insights', { index: 'ts', direction: 'prev', limit: msg.limit || 100, onEach: (r) => out.push(r) });
+      sendResponse({ insights: out });
+      return;
+    }
+    case MSG.GET_SCREENSHOTS: {
+      const out = [];
+      await idb.each('screenshots', {
+        index: msg.sessionId ? 'sessionId' : 'ts',
+        direction: 'next',
+        limit: msg.limit || 500,
+        onEach: (r) => {
+          if (msg.sessionId && r.sessionId !== msg.sessionId) return;
+          out.push({ id: r.id, ts: r.ts, url: r.url, reason: r.reason, width: r.width, height: r.height, analyzed: r.analyzed });
+        },
+      });
+      sendResponse({ screenshots: out });
+      return;
+    }
+    case MSG.GET_SCREENSHOT: {
+      const rec = await idb.get('screenshots', msg.id);
+      sendResponse({ screenshot: rec });
+      return;
+    }
+    case MSG.GET_STATS: {
+      sendResponse({ ...(await queryStats()), db: db.getStatus(), queue: await db.getQueueStats() });
+      return;
+    }
     default:
       return false;
   }
@@ -516,6 +574,51 @@ async function exportAll() {
   } finally {
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Data queries for the dashboard
+// ---------------------------------------------------------------------------
+async function queryEvents(msg) {
+  const limit = msg.limit || 100;
+  const out = [];
+  let scanned = 0;
+  await idb.each('events', {
+    index: 'ts',
+    direction: 'prev',
+    limit: Math.max(limit, limit * 10),
+    onEach: (r) => {
+      scanned++;
+      if (out.length >= limit) return false;
+      if (msg.sessionId && r.sessionId !== msg.sessionId) return;
+      if (msg.afterTs && r.ts < msg.afterTs) return;
+      if (msg.beforeTs && r.ts > msg.beforeTs) return;
+      if (msg.types && !msg.types.includes(r.type)) return;
+      out.push(r);
+    },
+  });
+  return out;
+}
+
+async function queryStats() {
+  const byType = {};
+  const byHour = {};
+  let total = 0;
+  let scanned = 0;
+  await idb.each('events', {
+    index: 'ts',
+    onEach: (r) => {
+      if (++scanned > 500000) return false;
+      byType[r.type] = (byType[r.type] || 0) + 1;
+      const hour = Math.floor(r.ts / 3600000) * 3600000;
+      byHour[hour] = (byHour[hour] || 0) + 1;
+      total++;
+    },
+  });
+  const sessions = await idb.count('sessions');
+  const screenshots = await idb.count('screenshots');
+  const insights = await idb.count('insights');
+  return { byType, byHour, total, sessions, screenshots, insights, scanned };
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,43 @@
+.page { max-width: 980px; margin: 0 auto; }
+header { margin-bottom: 14px; }
+
+.feed {
+  max-height: 420px; overflow: auto; font-size: 12px; margin-top: 6px;
+}
+.feed-item {
+  display: flex; gap: 8px; align-items: baseline;
+  padding: 3px 4px; border-bottom: 1px solid rgba(44,66,88,.35);
+}
+.feed-item .t { font-family: var(--mono); font-size: 11px; color: var(--muted); width: 66px; flex-shrink: 0; }
+.feed-item .ty { width: 108px; flex-shrink: 0; font-weight: 600; color: var(--accent); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed-item .d { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+
+.replay-stage {
+  position: relative; margin-top: 10px; border: 1px solid var(--border);
+  border-radius: 8px; overflow: hidden; background: #0a0f14; min-height: 200px;
+  display: flex; align-items: center; justify-content: center;
+}
+.replay-stage img { width: 100%; display: block; }
+.replay-empty { position: absolute; color: var(--muted); }
+.replay-events {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; max-height: 90px; overflow: auto;
+}
+.replay-events .chip {
+  font-size: 10px; padding: 2px 6px; border-radius: 12px; background: var(--panel2);
+  border: 1px solid var(--border); color: var(--muted); opacity: .35;
+}
+.replay-events .chip.lit { opacity: 1; color: var(--text); border-color: var(--accent); }
+
+.bars { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.bars .bar-row { display: flex; gap: 8px; align-items: center; }
+.bars .bar-label { width: 170px; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bars .bar-track { flex: 1; height: 12px; background: var(--bg2); border-radius: 6px; overflow: hidden; }
+.bars .bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent2), var(--accent)); border-radius: 6px; }
+.bars .bar-num { width: 60px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--text); }
+
+.insight { border-left: 3px solid var(--accent2); }
+.insight.negative { border-left-color: var(--bad); }
+.insight.warn { border-left-color: var(--warn); }
+.insight .head { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.insight .body { margin-top: 6px; font-size: 12px; color: var(--muted); white-space: pre-wrap; display: none; }
+.insight.open .body { display: block; }

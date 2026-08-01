@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Visual AI Agent — Dashboard</title>
+  <link rel="stylesheet" href="../ui.css" />
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="row">
+      <img src="../../icons/icon48.png" width="28" height="28" alt="logo" />
+      <div class="grow">
+        <h1>Visual AI Agent — Dashboard</h1>
+        <div class="muted" id="statusLine">Loading…</div>
+      </div>
+      <button id="btnOpenOptions" class="ghost pill-btn">Options</button>
+    </header>
+
+    <div class="tabs">
+      <button data-tab="live" class="active">Live</button>
+      <button data-tab="sessions">Sessions</button>
+      <button data-tab="replay">Replay</button>
+      <button data-tab="insights">Insights</button>
+      <button data-tab="heatmaps">Heatmaps</button>
+      <button data-tab="stats">Stats</button>
+    </div>
+
+    <!-- LIVE -->
+    <section id="panel-live" class="tab-panel active">
+      <div class="grid grid4" id="liveStats"></div>
+      <div class="card" style="margin-top:10px">
+        <div class="row">
+          <h3>Live event stream</h3>
+          <span class="grow"></span>
+          <input type="text" id="liveFilter" placeholder="filter type…" style="width:160px" />
+        </div>
+        <div id="liveFeed" class="feed"></div>
+      </div>
+    </section>
+
+    <!-- SESSIONS -->
+    <section id="panel-sessions" class="tab-panel">
+      <div class="card">
+        <table id="sessionsTable">
+          <thead><tr><th>Started</th><th>Duration</th><th>Events</th><th>Pages</th><th>Errors</th><th>Rage</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- REPLAY -->
+    <section id="panel-replay" class="tab-panel">
+      <div class="card">
+        <div class="row">
+          <div class="grow"><label>Session</label>
+            <select id="replaySession"></select></div>
+          <div><label>Speed</label>
+            <select id="replaySpeed">
+              <option value="500">0.5×</option>
+              <option value="250" selected>1×</option>
+              <option value="120">2×</option>
+              <option value="60">4×</option>
+            </select>
+          </div>
+        </div>
+        <div class="replay-stage" id="replayStage">
+          <img id="replayImg" alt="" />
+          <div class="replay-empty" id="replayEmpty">No frames captured for this session.</div>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="replayPrev">⏮</button>
+          <button id="replayToggle" class="primary">▶ Play</button>
+          <button id="replayNext">⏭</button>
+          <input type="range" id="replayScrub" min="0" max="0" value="0" class="grow" />
+          <span class="mono muted" id="replayPos">0 / 0</span>
+        </div>
+        <div class="replay-events" id="replayEvents"></div>
+        <div class="muted" id="replayMeta"></div>
+      </div>
+    </section>
+
+    <!-- INSIGHTS -->
+    <section id="panel-insights" class="tab-panel">
+      <div id="insightsList"></div>
+    </section>
+
+    <!-- HEATMAPS -->
+    <section id="panel-heatmaps" class="tab-panel">
+      <div class="card col">
+        <h3>Heatmap overlay (current tab)</h3>
+        <div class="muted" id="heatmapStatus">…</div>
+        <div class="row wrap">
+          <button id="btnHeatClicks">Click heatmap</button>
+          <button id="btnHeatScroll">Scroll heatmap</button>
+          <button id="btnHeatClear">Clear overlay</button>
+          <button id="btnHeatData">Fetch collected data</button>
+        </div>
+        <div id="heatmapData" class="mono" style="font-size:11px;max-height:220px;overflow:auto"></div>
+      </div>
+    </section>
+
+    <!-- STATS -->
+    <section id="panel-stats" class="tab-panel">
+      <div class="grid grid4" id="statTotals"></div>
+      <div class="card" style="margin-top:10px">
+        <h3>Event distribution</h3>
+        <div id="statBars" class="bars"></div>
+      </div>
+      <div class="card">
+        <h3>Sync status</h3>
+        <div id="statSync" class="muted"></div>
+      </div>
+    </section>
+  </div>
+
+  <script type="module" src="dashboard.js"></script>
+</body>
+</html>

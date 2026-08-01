@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Visual AI Agent — Options</title>
+  <link rel="stylesheet" href="../ui.css" />
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="row">
+      <img src="../../icons/icon48.png" width="28" height="28" alt="logo" />
+      <div class="grow">
+        <h1>Visual AI Agent — Options</h1>
+        <div class="muted" id="statusLine">Loading…</div>
+      </div>
+      <button id="btnSave" class="primary">Save settings</button>
+    </header>
+
+    <div class="tabs">
+      <button data-tab="general" class="active">General</button>
+      <button data-tab="tracking">Tracking</button>
+      <button data-tab="capture">Capture</button>
+      <button data-tab="vision">Vision AI</button>
+      <button data-tab="privacy">Privacy</button>
+      <button data-tab="database">Database</button>
+      <button data-tab="insights">Insights</button>
+    </div>
+
+    <!-- GENERAL -->
+    <section id="panel-general" class="tab-panel active">
+      <div class="card col">
+        <label class="check"><input type="checkbox" data-cfg="enabled" /> Enable monitoring</label>
+        <div class="row">
+          <div class="grow"><label>User ID (optional, for cross-device attribution)</label>
+            <input type="text" data-cfg="identity.userId" placeholder="e.g. user@example.com" /></div>
+          <div style="width:40%"><label>Device label</label>
+            <input type="text" data-cfg="identity.device" placeholder="e.g. work-laptop" /></div>
+        </div>
+        <div class="row wrap">
+          <label class="check"><input type="checkbox" data-cfg="ui.showBadge" /> Badge counter</label>
+          <label class="check"><input type="checkbox" data-cfg="ui.notifyOnInsight" /> Notify on insights</label>
+        </div>
+      </div>
+      <div class="card row wrap" style="gap:10px">
+        <button id="btnTest" class="ghost">Test DB connection</button>
+        <button id="btnExport" class="ghost">Export data (JSON)</button>
+        <button id="btnClear" class="danger">Clear local data</button>
+        <button id="btnReset" class="ghost">Reset to defaults</button>
+      </div>
+    </section>
+
+    <!-- TRACKING -->
+    <section id="panel-tracking" class="tab-panel">
+      <div class="card col">
+        <h3>Signal capture</h3>
+        <div class="grid grid2">
+          <label class="check"><input type="checkbox" data-cfg="tracking.trackClicks" /> Clicks</label>
+          <label class="check"><input type="checkbox" data-cfg="tracking.trackKeyboard" /> Keyboard</label>
+          <label class="check"><input type="checkbox" data-cfg="tracking.trackScroll" /> Scroll</label>
+          <label class="check"><input type="checkbox" data-cfg="tracking.trackNavigation" /> Navigation</label>
+          <label class="check"><input type="checkbox" data-cfg="tracking.trackForm" /> Forms</label>
+          <label class="check"><input type="checkbox" data-cfg="tracking.trackErrors" /> Errors</label>
+          <label class="check"><input type="checkbox" data-cfg="tracking.trackPerformance" /> Performance</label>
+          <label class="check"><input type="checkbox" data-cfg="tracking.trackFocus" /> Focus</label>
+          <label class="check"><input type="checkbox" data-cfg="tracking.trackTouch" /> Touch</label>
+          <label class="check"><input type="checkbox" data-cfg="tracking.trackDrag" /> Drag</label>
+          <label class="check"><input type="checkbox" data-cfg="tracking.trackSelection" /> Selection</label>
+          <label class="check"><input type="checkbox" data-cfg="tracking.trackIdle" /> Idle detection</label>
+          <label class="check"><input type="checkbox" data-cfg="tracking.trackMutations" /> DOM mutations (heavy)</label>
+        </div>
+      </div>
+      <div class="card grid grid3">
+        <div><label>Mouse sample (ms)</label><input type="number" data-cfg="tracking.mouseMoveSampleMs" /></div>
+        <div><label>Mouse min distance (px)</label><input type="number" data-cfg="tracking.mouseMoveMinDistance" /></div>
+        <div><label>Scroll throttle (ms)</label><input type="number" data-cfg="tracking.scrollThrottleMs" /></div>
+        <div><label>Max events / sec</label><input type="number" data-cfg="tracking.maxEventsPerSec" /></div>
+        <div><label>Mutation batch (ms)</label><input type="number" data-cfg="tracking.mutationBatchMs" /></div>
+        <div><label>Mutation max nodes</label><input type="number" data-cfg="tracking.mutationMaxNodes" /></div>
+      </div>
+    </section>
+
+    <!-- CAPTURE -->
+    <section id="panel-capture" class="tab-panel">
+      <div class="card col">
+        <label class="check"><input type="checkbox" data-cfg="capture.enabled" /> Screen capture enabled</label>
+        <div class="grid grid3">
+          <div><label>Interval (ms)</label><input type="number" data-cfg="capture.intervalMs" /></div>
+          <div><label>JPEG quality (10-100)</label><input type="number" data-cfg="capture.quality" /></div>
+          <div><label>Max width (px)</label><input type="number" data-cfg="capture.maxWidth" /></div>
+          <div><label>Max local frames</label><input type="number" data-cfg="capture.storeLocalMaxFrames" /></div>
+        </div>
+        <div class="row wrap">
+          <label class="check"><input type="checkbox" data-cfg="capture.onSignificantEvent" /> Shot on significant events</label>
+          <label class="check"><input type="checkbox" data-cfg="capture.onSessionEnd" /> Shot at session end</label>
+          <label class="check"><input type="checkbox" data-cfg="capture.storeLocal" /> Store locally (replay)</label>
+        </div>
+      </div>
+    </section>
+
+    <!-- VISION -->
+    <section id="panel-vision" class="tab-panel">
+      <div class="card col">
+        <label class="check"><input type="checkbox" data-cfg="vision.enabled" /> Vision analysis enabled</label>
+        <div class="grid grid2">
+          <div><label>Provider</label>
+            <select data-cfg="vision.provider" id="providerSelect">
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="ollama">Ollama (local)</option>
+              <option value="mock">Mock / offline</option>
+            </select>
+          </div>
+          <div><label>Model</label><input type="text" data-cfg="vision.model" id="modelInput" placeholder="auto" /></div>
+          <div><label>API key</label><input type="password" data-cfg="vision.apiKey" placeholder="sk-…" /></div>
+          <div><label>Base URL (optional)</label><input type="url" data-cfg="vision.baseUrl" placeholder="default for provider" /></div>
+          <div><label>Analyze every N-th frame</label><input type="number" data-cfg="vision.analyzeScreenEveryNth" /></div>
+          <div><label>Timeout (ms)</label><input type="number" data-cfg="vision.timeoutMs" /></div>
+          <div><label>Temperature</label><input type="number" step="0.1" data-cfg="vision.temperature" /></div>
+          <div><label>Max tokens</label><input type="number" data-cfg="vision.maxTokens" /></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PRIVACY -->
+    <section id="panel-privacy" class="tab-panel">
+      <div class="card col">
+        <h3>Masking & redaction</h3>
+        <div class="row wrap">
+          <label class="check"><input type="checkbox" data-cfg="privacy.maskSensitive" /> Mask sensitive fields</label>
+          <label class="check"><input type="checkbox" data-cfg="privacy.redactKeystrokeValues" /> Never store keystroke values</label>
+          <label class="check"><input type="checkbox" data-cfg="privacy.dropScreenshotsOnSensitivePage" /> Drop screenshots on sensitive pages</label>
+          <label class="check"><input type="checkbox" data-cfg="privacy.disableOnIncognito" /> Disable in incognito</label>
+          <label class="check"><input type="checkbox" data-cfg="privacy.stripQueryParams" /> Strip query params from URLs</label>
+        </div>
+        <div class="grid grid3">
+          <div><label>Retention (days)</label><input type="number" data-cfg="privacy.dataRetentionDays" /></div>
+        </div>
+        <div><label>Never track these hosts (one per line)</label>
+          <textarea data-cfg="privacy.denylistHosts" rows="3" data-list></textarea></div>
+        <div><label>Only track these hosts (empty = all)</label>
+          <textarea data-cfg="privacy.allowlistHosts" rows="3" data-list></textarea></div>
+        <div><label>Additional sensitive domains (one per line)</label>
+          <textarea data-cfg="privacy.sensitiveDomains" rows="3" data-list></textarea></div>
+      </div>
+    </section>
+
+    <!-- DATABASE -->
+    <section id="panel-database" class="tab-panel">
+      <div class="card col">
+        <label>Events endpoint (REST, receives POST JSON)</label>
+        <input type="url" data-cfg="db.endpoint" placeholder="https://your-server.example/api/events" />
+        <div class="grid grid2">
+          <div><label>API key (x-api-key header)</label><input type="password" data-cfg="db.apiKey" /></div>
+          <div><label>Batch size</label><input type="number" data-cfg="db.batchSize" /></div>
+          <div><label>Flush interval (ms)</label><input type="number" data-cfg="db.flushIntervalMs" /></div>
+          <div><label>Max retries</label><input type="number" data-cfg="db.maxRetries" /></div>
+          <div><label>Retry base (ms)</label><input type="number" data-cfg="db.retryBaseMs" /></div>
+          <div><label>Offline queue limit</label><input type="number" data-cfg="db.offlineQueueLimit" /></div>
+        </div>
+        <div class="row wrap">
+          <label class="check"><input type="checkbox" data-cfg="db.sendEvents" /> Send events</label>
+          <label class="check"><input type="checkbox" data-cfg="db.sendScreenshots" /> Send screenshots</label>
+          <label class="check"><input type="checkbox" data-cfg="db.sendInsights" /> Send insights</label>
+        </div>
+      </div>
+    </section>
+
+    <!-- INSIGHTS -->
+    <section id="panel-insights" class="tab-panel">
+      <div class="card col">
+        <label class="check"><input type="checkbox" data-cfg="insights.enabled" /> Heuristic insights enabled</label>
+        <div class="grid grid3">
+          <div><label>Rage-click threshold</label><input type="number" data-cfg="insights.rageClickThreshold" /></div>
+          <div><label>Rage-click window (ms)</label><input type="number" data-cfg="insights.rageClickWindowMs" /></div>
+          <div><label>Dead-click delay (ms)</label><input type="number" data-cfg="insights.deadClickDelayMs" /></div>
+          <div><label>Idle threshold (ms)</label><input type="number" data-cfg="insights.idleThresholdMs" /></div>
+          <div><label>Error-spike threshold</label><input type="number" data-cfg="insights.errorSpikeThreshold" /></div>
+          <div><label>Error-spike window (ms)</label><input type="number" data-cfg="insights.errorSpikeWindowMs" /></div>
+        </div>
+        <label class="check"><input type="checkbox" data-cfg="insights.generateEndOfSessionSummary" /> Generate end-of-session AI summary</label>
+      </div>
+    </section>
+  </div>
+
+  <script type="module" src="options.js"></script>
+</body>
+</html>

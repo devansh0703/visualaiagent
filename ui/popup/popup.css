@@ -1,0 +1,9 @@
+body { width: 360px; }
+header { margin-bottom: 10px; }
+.stats-grid { margin-bottom: 10px; }
+.scan-modal {
+  position: fixed; inset: 0; background: rgba(8,14,20,.6);
+  display: flex; align-items: center; justify-content: center; z-index: 10;
+}
+.scan-modal.hidden { display: none; }
+.scan-box { width: 90%; max-height: 80%; overflow: auto; }
