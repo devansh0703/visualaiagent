@@ -22,8 +22,15 @@ export function initDb({ getConfig }) {
 }
 
 export function baseOf(endpoint) {
-  const m = /^(.*)\/[^/]+$/.exec((endpoint || '').replace(/\/+$/, ''));
-  return m ? m[1] : endpoint || '';
+  try {
+    const u = new URL(endpoint || '');
+    let p = u.pathname.replace(/\/+$/, '');
+    p = p.replace(/\/[^/]*$/, '');
+    u.pathname = p;
+    return u.href.replace(/\/+$/, '');
+  } catch {
+    return endpoint || '';
+  }
 }
 
 export function scheduleNext(delayMs) {

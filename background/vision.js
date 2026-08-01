@@ -211,6 +211,8 @@ function mockVision(context, prompt) {
 
 /* ------------------------------ main entry ------------------------------ */
 
+export { extractJSON, dataUrlParts };
+
 export async function analyze({ config, context }) {
   const vision = config.vision || {};
   const provider = vision.provider || 'mock';

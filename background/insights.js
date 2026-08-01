@@ -28,6 +28,7 @@ export class InsightsEngine {
   ingest(ev) {
     const cfg = this.config.insights || {};
     if (cfg.enabled === false) return;
+    if (!ev || !ev.type) return;
     this.recent.push(ev);
     if (this.recent.length > RING) this.recent.shift();
 
@@ -60,7 +61,7 @@ export class InsightsEngine {
       confidence,
     };
     try {
-      idb.put('insights', rec);
+      idb.put('insights', rec).catch(() => {});
     } catch {}
     if (this.onInsight) this.onInsight(rec);
     return rec;

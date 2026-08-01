@@ -55,7 +55,7 @@
       case 'a': return el.hasAttribute('href') ? 'link' : 'anchor';
       case 'button': return 'button';
       case 'input':
-        switch ((el.type || 'text').toLowerCase()) {
+        switch ((el.type || (el.getAttribute && el.getAttribute('type')) || 'text').toLowerCase()) {
           case 'checkbox': return 'checkbox';
           case 'radio': return 'radio';
           case 'range': return 'slider';
@@ -172,8 +172,9 @@
     let guard = 0;
     while (node && node.nodeType === 1 && guard++ < 8) {
       const tag = (node.tagName || '').toLowerCase();
-      if (node.id) {
-        parts.unshift('#' + escape(node.id));
+      const nodeId = node.id || (node.getAttribute && node.getAttribute('id')) || '';
+      if (nodeId) {
+        parts.unshift('#' + escape(nodeId));
         break;
       }
       const parent = node.parentElement;
@@ -331,11 +332,17 @@
   /** Extract a compact list of interactive elements currently in the viewport (for AI). */
   function visibleInteractiveElements(max = 80) {
     if (typeof document === 'undefined') return [];
+    if (typeof document.querySelectorAll !== 'function') return [];
     const out = [];
     const tags = new Set(['a', 'button', 'input', 'select', 'textarea', 'summary']);
-    const all = document.querySelectorAll('a,button,input,select,textarea,summary,[role="button"],[role="link"],[role="menuitem"],[role="tab"]');
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    let all;
+    try {
+      all = document.querySelectorAll('a,button,input,select,textarea,summary,[role="button"],[role="link"],[role="menuitem"],[role="tab"]');
+    } catch {
+      return [];
+    }
+    const vw = (typeof window !== 'undefined' && window.innerWidth) || 1200;
+    const vh = (typeof window !== 'undefined' && window.innerHeight) || 800;
     let added = 0;
     for (const el of all) {
       if (added >= max) break;
@@ -361,15 +368,20 @@
   /** Compact page summary for vision/scan requests. */
   function pageSummary(maxElements = 80) {
     if (typeof document === 'undefined') return { title: '', url: '', elements: [] };
-    const text = cleanText(document.body && document.body.innerText ? document.body.innerText : '', 2000);
+    let text = '';
+    try {
+      text = document.body && document.body.innerText ? cleanText(document.body.innerText, 2000) : '';
+    } catch {
+      text = '';
+    }
     return {
       title: document.title || '',
-      url: location.href,
+      url: (typeof location !== 'undefined' && location.href) || '',
       text,
       elements: visibleInteractiveElements(maxElements),
-      viewport: { w: window.innerWidth, h: window.innerHeight },
-      scrollY: window.scrollY || 0,
-      scrollHeight: document.documentElement.scrollHeight || 0,
+      viewport: { w: (window && window.innerWidth) || 0, h: (window && window.innerHeight) || 0 },
+      scrollY: (window && window.scrollY) || 0,
+      scrollHeight: (document.documentElement && document.documentElement.scrollHeight) || 0,
     };
   }
 

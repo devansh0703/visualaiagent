@@ -87,8 +87,8 @@ export function sanitizeUrl(raw, stripQuery = true) {
   try {
     const u = new URL(raw);
     if (stripQuery) u.search = '';
-    if (u.password) u.password = '••••';
-    if (u.username && !['', 'user'].includes(u.username)) u.username = '';
+    u.username = '';
+    u.password = '';
     return u.href;
   } catch {
     return String(raw).slice(0, 2048);
