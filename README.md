@@ -25,8 +25,8 @@ single, local-first, privacy-respecting extension you fully control.
 - Captures the visible tab, re-encodes it through an offscreen document, and
   sends it to a vision model for scene analysis (what's on screen, likely user
   intent, UI issues)
-- Providers: **OpenAI**, **Anthropic**, **Gemini**, **OpenRouter**, **Ollama**
-  (local), plus an offline **mock** provider for development
+- Providers: **OpenAI**, **Anthropic**, **Gemini**, **Groq**, **OpenRouter**,
+  **Ollama** (local), plus an offline **mock** provider for development
 - Capture triggers: periodic, on significant events (click/nav/error), manual
 
 ### Insights (heuristic + LLM)
@@ -71,7 +71,7 @@ See `shared/config.js` for defaults. Key sections (editable in Options):
 | `tracking.*` | Toggle mouse/keyboard/scroll/navigation/errors |
 | `capture.enabled` | Screen capture on/off; interval, quality, maxWidth |
 | `capture.storeLocal` | Keep frames locally for replay (default on) |
-| `vision.provider` | `openai` / `anthropic` / `gemini` / `openrouter` / `ollama` / `mock` |
+| `vision.provider` | `openai` / `anthropic` / `gemini` / `groq` / `openrouter` / `ollama` / `mock` |
 | `vision.apiKey` | Provider key (stored in `chrome.storage.local`) |
 | `db.endpoint` | Receiver URL for events (e.g. `http://localhost:8787/api/events`) |
 | `db.sendEvents` / `sendScreenshots` / `sendInsights` | Per-channel sync toggles |
@@ -124,11 +124,16 @@ HTTP.
 ## Testing
 
 ```bash
-npm test      # 36 unit tests (config, utils, element-tools, session, insights, vision, db)
+npm test            # 38 unit tests (config, utils, element-tools, session, insights, vision, db)
+npm run test:integration  # live provider checks — skips without keys
 npm run e2e   # loads the real extension in headless Chrome (puppeteer-core +
               #   system Chrome), drives the /demo page, and verifies tracking,
               #   redaction, capture, vision, and the full receiver round-trip
 ```
+
+The live integration test runs against **Groq** when `GROQ_API_KEY` is set
+(see `.env.example`). Note that Groq's free on-demand tier is token-limited
+and vision requests are token-heavy, so keep `vision.maxTokens` modest.
 
 E2E uses Chrome 137+ `Extensions.loadUnpacked` via puppeteer's
 `installExtension()` because branded Chrome builds removed `--load-extension`.
