@@ -18,6 +18,7 @@ function open() {
       if (!ev.indexNames.contains('sent')) ev.createIndex('sent', 'sent');
       const sh = req.transaction.objectStore('screenshots');
       if (!sh.indexNames.contains('ts')) sh.createIndex('ts', 'ts');
+      if (!sh.indexNames.contains('sessionId')) sh.createIndex('sessionId', 'sessionId');
       const in2 = req.transaction.objectStore('insights');
       if (!in2.indexNames.contains('ts')) in2.createIndex('ts', 'ts');
     };

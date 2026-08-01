@@ -134,32 +134,39 @@ export async function flushNow() {
     }
     let sent = 0;
     lastFlushStatus = 'flushing';
-    if (db.sendEvents !== false) {
-      sent += await drain('events', {
-        batchSize: db.batchSize || 25,
-        url: db.endpoint,
-        buildBody: (batch) => ({
-          kind: 'events',
-          ts: now(),
-          deviceId: cfg._deviceId,
-          userId: cfg._userId,
-          events: batch.map((r) => r),
-        }),
-      });
-    }
-    if (db.sendScreenshots) {
-      sent += await drain('screenshots', {
-        batchSize: 2,
-        url: db.screenshotEndpoint || baseOf(db.endpoint) + '/screenshots',
-        buildBody: (batch) => ({ kind: 'screenshots', ts: now(), deviceId: cfg._deviceId, userId: cfg._userId, screenshots: batch.map((r) => r) }),
-      });
-    }
-    if (db.sendInsights !== false) {
-      sent += await drain('insights', {
-        batchSize: db.batchSize || 25,
-        url: db.insightEndpoint || baseOf(db.endpoint) + '/insights',
-        buildBody: (batch) => ({ kind: 'insights', ts: now(), deviceId: cfg._deviceId, userId: cfg._userId, insights: batch.map((r) => r) }),
-      });
+    // Loop until every queued record has been drained (each pass is capped at
+    // batchSize per store, so large queues take several passes).
+    for (let pass = 0; pass < 100; pass++) {
+      let passSent = 0;
+      if (db.sendEvents !== false) {
+        passSent += await drain('events', {
+          batchSize: db.batchSize || 25,
+          url: db.endpoint,
+          buildBody: (batch) => ({
+            kind: 'events',
+            ts: now(),
+            deviceId: cfg._deviceId,
+            userId: cfg._userId,
+            events: batch.map((r) => r),
+          }),
+        });
+      }
+      if (db.sendScreenshots) {
+        passSent += await drain('screenshots', {
+          batchSize: 2,
+          url: db.screenshotEndpoint || baseOf(db.endpoint) + '/screenshots',
+          buildBody: (batch) => ({ kind: 'screenshots', ts: now(), deviceId: cfg._deviceId, userId: cfg._userId, screenshots: batch.map((r) => r) }),
+        });
+      }
+      if (db.sendInsights !== false) {
+        passSent += await drain('insights', {
+          batchSize: db.batchSize || 25,
+          url: db.insightEndpoint || baseOf(db.endpoint) + '/insights',
+          buildBody: (batch) => ({ kind: 'insights', ts: now(), deviceId: cfg._deviceId, userId: cfg._userId, insights: batch.map((r) => r) }),
+        });
+      }
+      sent += passSent;
+      if (passSent === 0) break;
     }
     lastFlushAt = now();
     lastFlushStatus = sent > 0 ? 'ok' : 'idle';

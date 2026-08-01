@@ -52,15 +52,26 @@ function isCapturableUrl(url) {
 /** Capture the visible tab and store/analyze it. */
 export async function captureNow({ tabId, reason = 'scheduled', session, config, onAnalyze }) {
   if (!config.capture || config.capture.enabled === false) return null;
-  try {
-    const tab = await chrome.tabs.get(tabId || session.tabId);
-    if (!tab || !isCapturableUrl(tab.url)) return null;
-  } catch {
-    return null;
+  let tab = null;
+  if (tabId) {
+    try {
+      tab = await chrome.tabs.get(tabId);
+      if (tab && !isCapturableUrl(tab.url)) tab = null;
+    } catch {
+      tab = null;
+    }
   }
+  if (!tab) {
+    // Fall back to the currently visible tab so manual captures always work
+    // even when the session has no capturable pinned tabId yet.
+    const active = await chrome.tabs.query({ active: true, currentWindow: true });
+    tab = active && active[0];
+  }
+  if (!tab || !isCapturableUrl(tab.url)) return null;
+  tabId = tab.id;
   let raw;
   try {
-    raw = await chrome.tabs.captureVisibleTab(tabId, { format: 'jpeg', quality: Math.min(100, Math.max(10, config.capture.quality)) });
+    raw = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: Math.min(100, Math.max(10, config.capture.quality)) });
   } catch (e) {
     captureLog('error', 'captureVisibleTab failed: ' + e.message);
     return null;

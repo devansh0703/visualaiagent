@@ -1,0 +1,8 @@
+{
+  "extName": {
+    "message": "Visual AI Agent — Screen Intelligence"
+  },
+  "extDescription": {
+    "message": "Monitors the browser screen and all user activity, analyzes it with a vision AI model, and streams structured telemetry to your database."
+  }
+}

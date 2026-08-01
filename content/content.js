@@ -717,6 +717,9 @@
     try {
       connect();
       if (VAIA.privacy) VAIA.privacy.start(4000);
+      try {
+        document.documentElement.setAttribute('data-vaia', 'active');
+      } catch {}
       if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
         chrome.storage.local.get('vaia:config').then((res) => {
           if (res && res['vaia:config']) cfg = Object.assign(cfg, res['vaia:config']);

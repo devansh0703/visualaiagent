@@ -670,7 +670,12 @@ function counterAll() {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  handleMessage(msg, sender, sendResponse);
+  handleMessage(msg, sender, sendResponse).catch((e) => {
+    captureLog('error', 'handleMessage failed: ' + ((e && e.stack) || e));
+    try {
+      sendResponse({ error: (e && e.message) || String(e) });
+    } catch {}
+  });
   return true; // async
 });
 
