@@ -19,6 +19,16 @@ test('extractJSON falls back to first object in noisy text', () => {
   assert.deepEqual(out, { c: 3 });
 });
 
+test('extractJSON strips think blocks before parsing', () => {
+  const out = extractJSON('<think>\nThe image is a solid blue square.\nSo:\n</think>\n{"screen":{"summary":"A solid blue square"}}');
+  assert.deepEqual(out, { screen: { summary: 'A solid blue square' } });
+});
+
+test('extractJSON strips fenced think-wrapped JSON', () => {
+  const out = extractJSON('```json\n<think>x</think>\n{"a":[1,2]}\n```');
+  assert.deepEqual(out, { a: [1, 2] });
+});
+
 test('extractJSON returns null for garbage', () => {
   assert.equal(extractJSON('no json here'), null);
   assert.equal(extractJSON(''), null);

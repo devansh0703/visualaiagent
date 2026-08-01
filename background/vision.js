@@ -72,13 +72,12 @@ async function fetchJson(url, options, timeoutMs) {
 
 function extractJSON(text) {
   if (!text) return null;
-  const cleaned = String(text).trim();
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(cleaned);
-  if (fenced) {
-    try {
-      return JSON.parse(fenced[1]);
-    } catch {}
-  }
+  // Thinking/reasoning models (e.g. Qwen on Groq) emit <think>…</think>
+  // prose even when the prompt forbids it — strip it before parsing.
+  let cleaned = String(text)
+    .replace(/```(?:json)?\s*([\s\S]*?)```/g, (m, inner) => inner)
+    .replace(/<think>[\s\S]*?<\/think>/g, '')
+    .trim();
   try {
     return JSON.parse(cleaned);
   } catch {}
