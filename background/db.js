@@ -43,13 +43,34 @@ export function scheduleNext(delayMs) {
   }, delayMs != null ? delayMs : interval);
 }
 
+export function cancelScheduler() {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+}
+
 /** Serialize + mark an event record for outbound sync. */
-export function enqueue(store, record) {
+export async function enqueue(store, record) {
   record.sent = false;
   record.failed = false;
   record.attempts = 0;
   record._queue = true;
   inc(`queued_${store}`);
+  // Cap the offline queue so a long outage can't fill unlimited storage.
+  if (store === 'events') {
+    const cfg = (configRef && configRef()) || {};
+    const limit = cfg.db && cfg.db.offlineQueueLimit;
+    if (limit && limit > 0) {
+      const count = await idb.count('events');
+      if (count >= limit) {
+        const drop = count - limit + 1;
+        const oldest = [];
+        await idb.each('events', { index: 'ts', direction: 'next', limit: drop, onEach: (r) => oldest.push(r.id) });
+        if (oldest.length) await idb.deleteMany('events', oldest);
+      }
+    }
+  }
   return idb.put(store, record);
 }
 
@@ -58,10 +79,12 @@ async function drain(store, { batchSize, url, buildBody, mark }) {
   if (!url) return 0;
   const maxRetries = cfg.db && cfg.db.maxRetries != null ? cfg.db.maxRetries : 6;
   const batch = [];
+  // Walk the ts index and collect up to batchSize UNSENT records. The cursor
+  // limit must not count already-sent records, otherwise a full batch of sent
+  // records would block the queue forever.
   await idb.each(store, {
     index: 'ts',
     direction: 'next',
-    limit: batchSize,
     onEach: (rec) => {
       if (rec.sent || rec.failed) return;
       if ((rec.attempts || 0) >= maxRetries) {
@@ -70,6 +93,7 @@ async function drain(store, { batchSize, url, buildBody, mark }) {
         return;
       }
       batch.push(rec);
+      return batch.length < batchSize ? undefined : false;
     },
   });
   if (!batch.length) return 0;
@@ -104,7 +128,7 @@ async function drain(store, { batchSize, url, buildBody, mark }) {
       rec.sent = true;
       rec.sentAt = at;
       rec.attempts = (rec.attempts || 0) + 1;
-      idb.put(store, rec);
+      await idb.put(store, rec);
     }
     inc(`sent_${store}`, batch.length);
     return batch.length;
@@ -114,7 +138,7 @@ async function drain(store, { batchSize, url, buildBody, mark }) {
     rec.attempts = (rec.attempts || 0) + 1;
     rec.lastAttemptAt = at;
     rec.nextRetryAt = at + retryBase * 2 ** Math.min(rec.attempts, 6);
-    idb.put(store, rec);
+    await idb.put(store, rec);
   }
   lastFlushError = errMsg;
   return 0;
@@ -171,6 +195,7 @@ export async function flushNow() {
     lastFlushAt = now();
     lastFlushStatus = sent > 0 ? 'ok' : 'idle';
     inc('flush_count');
+    return sent;
   } finally {
     inFlight = false;
     scheduleNext();

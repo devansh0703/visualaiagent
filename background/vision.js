@@ -230,9 +230,13 @@ export async function analyze({ config, context }) {
   const vision = config.vision || {};
   const provider = vision.provider || 'mock';
   const model = vision.model || defaultModels()[provider] || defaultModels().mock;
-  const promptText = buildPrompt(context);
+  let promptText = buildPrompt(context);
+  let systemPrompt = SYSTEM_PROMPT;
+  if (vision.language && vision.language.toLowerCase() !== 'en') {
+    systemPrompt += `\nRespond in the language: ${vision.language}.`;
+  }
 
-  const userContent = [{ type: 'text', text: `${SYSTEM_PROMPT}\n\n${promptText}` }];
+  const userContent = [{ type: 'text', text: `${systemPrompt}\n\n${promptText}` }];
   if (context.dataUrl) {
     userContent.push({ type: 'image', image_url: { url: context.dataUrl } });
   }
@@ -245,7 +249,7 @@ export async function analyze({ config, context }) {
           model,
           baseUrl: vision.baseUrl,
           apiKey: vision.apiKey,
-          messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: userContent }],
+          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
           temperature: vision.temperature,
           maxTokens: vision.maxTokens,
           timeoutMs: vision.timeoutMs,
@@ -278,7 +282,7 @@ export async function analyze({ config, context }) {
           model,
           baseUrl: vision.baseUrl || 'https://openrouter.ai/api/v1',
           apiKey: vision.apiKey,
-          messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: userContent }],
+          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
           temperature: vision.temperature,
           maxTokens: vision.maxTokens,
           timeoutMs: vision.timeoutMs,
@@ -289,7 +293,7 @@ export async function analyze({ config, context }) {
           model,
           baseUrl: vision.baseUrl || 'https://api.groq.com/openai/v1',
           apiKey: vision.apiKey,
-          messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: userContent }],
+          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
           temperature: vision.temperature,
           maxTokens: vision.maxTokens,
           timeoutMs: vision.timeoutMs,
@@ -305,7 +309,7 @@ export async function analyze({ config, context }) {
           model,
           baseUrl: vision.baseUrl,
           apiKey: vision.apiKey,
-          messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: userContent }],
+          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
           temperature: vision.temperature,
           maxTokens: vision.maxTokens,
           timeoutMs: vision.timeoutMs,

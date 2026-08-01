@@ -5,7 +5,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "test": "node --test \"test/unit/*.test.mjs\"",
+    "test": "node --experimental-test-module-mocks --test \"test/unit/*.test.mjs\"",
     "test:integration": "node --test \"test/integration/*.test.mjs\"",
     "e2e": "node test/e2e/run.mjs",
     "server": "node server/server.mjs",

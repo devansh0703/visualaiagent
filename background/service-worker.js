@@ -130,6 +130,13 @@ async function finalizeSession(s) {
   } catch (e) {
     captureLog('warn', 'end-of-session summary failed: ' + e.message);
   }
+  try {
+    if (getConfig().capture?.onSessionEnd) {
+      await capture.captureNow({ tabId: s.tabId, reason: 'session_end', session: s, config: getConfig(), onAnalyze: onAnalyzeScreenshot });
+    }
+  } catch (e) {
+    captureLog('warn', 'session-end capture failed: ' + e.message);
+  }
   await idb.put('sessions', rec);
   await emitEvent({ id: uuid(), ts: now(), type: ET.SESSION_END, url: '', title: '', data: { sessionId: s.id, durationMs: rec.durationMs, ...rec.eventTypes } }, { skipSession: true });
   captureLog('info', `session ended: ${s.id} (${rec.durationMs}ms)`);
@@ -400,6 +407,10 @@ async function retentionCleanup() {  const days = config.privacy && config.priva
 function onConnect(port) {
   if (port.name !== 'vaia-port') return;
   const tabId = port.sender && port.sender.tab && port.sender.tab.id;
+  if (config.privacy?.disableOnIncognito && port.sender?.tab?.incognito) {
+    captureLog('debug', 'port dropped: incognito tab and disableOnIncognito');
+    return;
+  }
   ports.set(tabId, port);
   port.onMessage.addListener(async (msg) => {
     if (!msg) return;

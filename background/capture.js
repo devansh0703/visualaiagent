@@ -49,6 +49,24 @@ function isCapturableUrl(url) {
   return !!url && /^https?:/i.test(url);
 }
 
+/** True when the URL's host is in (or a subdomain of) the sensitive list. */
+function isSensitiveUrl(url, domains) {
+  if (!Array.isArray(domains) || !domains.length || !url) return false;
+  let host = '';
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return domains.some((d) => {
+    const ds = String(d).toLowerCase().trim().replace(/^https?:\/\//, '');
+    if (!ds) return false;
+    return host === ds || host.endsWith('.' + ds);
+  });
+}
+
+export { isSensitiveUrl };
+
 /** Capture the visible tab and store/analyze it. */
 export async function captureNow({ tabId, reason = 'scheduled', session, config, onAnalyze }) {
   if (!config.capture || config.capture.enabled === false) return null;
@@ -68,6 +86,14 @@ export async function captureNow({ tabId, reason = 'scheduled', session, config,
     tab = active && active[0];
   }
   if (!tab || !isCapturableUrl(tab.url)) return null;
+  if (config.privacy?.disableOnIncognito && tab.incognito) {
+    captureLog('debug', 'capture skipped: incognito tab and disableOnIncognito');
+    return null;
+  }
+  if (config.privacy?.dropScreenshotsOnSensitivePage && isSensitiveUrl(tab.url, config.privacy.sensitiveDomains)) {
+    captureLog('debug', 'capture skipped: sensitive page');
+    return null;
+  }
   tabId = tab.id;
   let raw;
   try {

@@ -265,7 +265,21 @@ const server = createServer(async (req, res) => {
   if (req.method === 'GET' && url === '/api/insights') return serveGet(res, 'insights', qparams(req.url));
   if (req.method === 'GET' && url === '/api/sessions') return serveGet(res, 'sessions', qparams(req.url));
   if (req.method === 'GET' && url === '/api/heatmap') {
-    const rows = db.prepare('SELECT x, y, COUNT(*) as n FROM events WHERE type IN (?,?) AND payload LIKE ? GROUP BY x, y').all('click', 'mouse_down', '%'); // placeholder
+    let rows;
+    try {
+      rows = db
+        .prepare(
+          `SELECT CAST(json_extract(payload, '$.data.x') AS INTEGER) AS x,
+                  CAST(json_extract(payload, '$.data.y') AS INTEGER) AS y,
+                  COUNT(*) AS n
+           FROM events
+           WHERE type IN (?, ?) AND json_extract(payload, '$.data.x') IS NOT NULL
+           GROUP BY x, y ORDER BY n DESC LIMIT 500`
+        )
+        .all('click', 'mouse_down');
+    } catch {
+      rows = [];
+    }
     return json(res, 200, { ok: true, rows });
   }
   if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'method not allowed' });

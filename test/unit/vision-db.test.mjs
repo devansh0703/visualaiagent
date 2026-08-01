@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { extractJSON, dataUrlParts, analyze } from '../../background/vision.js';
 import { baseOf } from '../../background/db.js';
+import { isSensitiveUrl } from '../../background/capture.js';
 import { visionProviders, defaultModels } from '../../shared/config.js';
 
 test('extractJSON parses fenced JSON', () => {
@@ -62,4 +63,14 @@ test('every provider in visionProviders() has a default model', () => {
   for (const p of visionProviders()) {
     assert.ok(models[p.id], `missing default model for ${p.id}`);
   }
+});
+
+test('isSensitiveUrl matches exact hosts and subdomains', () => {
+  const domains = ['bank.example.com', 'mail.com'];
+  assert.equal(isSensitiveUrl('https://bank.example.com/dashboard', domains), true);
+  assert.equal(isSensitiveUrl('https://secure.mail.com/inbox', domains), true);
+  assert.equal(isSensitiveUrl('https://example.com/', domains), false);
+  assert.equal(isSensitiveUrl('https://notbank.example.com.evil.net/', domains), false);
+  assert.equal(isSensitiveUrl('https://safe.com/', []), false);
+  assert.equal(isSensitiveUrl('not-a-url', domains), false);
 });
