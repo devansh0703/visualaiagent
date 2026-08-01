@@ -7,12 +7,15 @@
 import { DEFAULTS, normalizeConfig, deepMerge, defaultModels } from '../shared/config.js';
 import { MSG, ET, MODES } from '../shared/protocol.js';
 import { uuid, now, sanitizeUrl, LRUSet } from '../shared/utils.js';
+import { focusScoreOf } from '../shared/categories.js';
 import * as storage from './storage.js';
 import * as idb from './idb.js';
 import { Session } from './session.js';
 import { InsightsEngine } from './insights.js';
 import * as capture from './capture.js';
 import * as db from './db.js';
+import * as vision from './vision.js';
+import { computeDigest, buildDigestBody } from './digest.js';
 import { captureLog, inc, counter, snapshot as logSnapshot } from './telemetry.js';
 
 // ---------------------------------------------------------------------------
@@ -123,6 +126,9 @@ async function startSession() {
 async function finalizeSession(s) {
   if (!s) return;
   const rec = s.end();
+  try {
+    rec.focus = focusScoreOf(s.pages);
+  } catch {}
   await storage.persistSession(s);
   try {
     const summary = await insights.endOfSessionSummary(s);
@@ -219,9 +225,8 @@ function emitInsight(rec) {
 // Screenshot analysis
 // ---------------------------------------------------------------------------
 async function onAnalyzeScreenshot(record, reason) {
-  const { analyze } = await import('./vision.js');
   const recentEvents = recentSummary(session, 12);
-  const result = await analyze({
+  const result = await vision.analyze({
     config,
     context: {
       url: record.url,
@@ -255,6 +260,65 @@ function recentSummary(s, n = 12) {
   }
   if (!out.length) out.push({ type: 'page_view', summary: 'no page yet' });
   return out.slice(-n);
+}
+
+// ---------------------------------------------------------------------------
+// Agent chat + daily digest
+// ---------------------------------------------------------------------------
+async function askAgent(question, tabId) {
+  if (!question || !String(question).trim()) return { ok: false, error: 'empty question' };
+  let rec = null;
+  try {
+    rec = await capture.captureNow({ tabId, reason: 'agent_ask', session, config: getConfig(), onAnalyze: null });
+  } catch (e) {
+    captureLog('warn', 'ask_agent capture failed: ' + e.message);
+  }
+  if (!rec || !rec.dataUrl) return { ok: false, error: 'could not capture the visible tab' };
+  // Never spend a paid API key unless the user configured one.
+  const vcfg = { ...config.vision };
+  if (!vcfg.provider) vcfg.provider = 'mock';
+  if (!vcfg.apiKey && vcfg.provider !== 'mock' && vcfg.provider !== 'ollama') vcfg.provider = 'mock';
+  const result = await vision.analyze({
+    config: { vision: vcfg },
+    context: {
+      url: rec.url,
+      title: rec.title || '',
+      dataUrl: rec.dataUrl,
+      recentEvents: recentSummary(session, 8),
+      question: String(question).trim(),
+    },
+  });
+  const insightRec = {
+    id: uuid(),
+    ts: now(),
+    kind: 'vision',
+    type: 'agent_answer',
+    title: 'Agent answer',
+    body: result.summary || '',
+    signal: 'neutral',
+    confidence: result.confidence ?? 0.5,
+    sessionId: session ? session.id : '',
+    data: { question: String(question).trim(), answer: result.summary, provider: result.provider, model: result.model, url: rec.url },
+  };
+  await idb.put('insights', insightRec);
+  emitInsight(insightRec);
+  return { ok: true, answer: result.summary, model: result.model, provider: result.provider, insightId: insightRec.id };
+}
+
+async function runDigest() {
+  const rec = await computeDigest({ idb, config, deviceId, userId, sessionId: session ? session.id : '' });
+  rec.body = buildDigestBody(rec);
+  await idb.put('insights', rec);
+  emitInsight(rec);
+  captureLog('info', `daily digest: ${rec.data.total} events in window`);
+  return rec;
+}
+
+function nextDigestTime(hour) {
+  const d = new Date();
+  d.setHours(hour, 0, 0, 0);
+  if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+  return d.getTime();
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +412,11 @@ async function setupAlarms() {
     await chrome.alarms.create('vaia:flush', { periodInMinutes: 1 });
     await chrome.alarms.create('vaia:cleanup', { periodInMinutes: 60 * 24 });
     await chrome.alarms.create('vaia:heartbeat', { periodInMinutes: 1 });
+    const dg = config.digest || {};
+    if (dg.enabled !== false) {
+      const hour = dg.hourOfDay != null ? dg.hourOfDay : 20;
+      await chrome.alarms.create('vaia:digest', { when: nextDigestTime(hour), periodInMinutes: 60 * 24 });
+    }
   } catch (e) {
     captureLog('warn', 'alarms setup: ' + e.message);
   }
@@ -360,6 +429,8 @@ chrome.alarms.onAlarm.addListener(async (a) => {
     updateBadge();
   } else if (a.name === 'vaia:cleanup') {
     await retentionCleanup();
+  } else if (a.name === 'vaia:digest') {
+    await runDigest();
   } else if (a.name === 'vaia:heartbeat') {
     // finalize a stale session
     if (session && config.enabled && now() - session.lastActivityAt > 10 * 60 * 1000) {
@@ -558,6 +629,42 @@ async function handleMessage(msg, sender, sendResponse) {
       sendResponse({ ...(await queryStats()), db: db.getStatus(), queue: await db.getQueueStats() });
       return;
     }
+    case MSG.ASK_AGENT: {
+      try {
+        const out = await askAgent(msg.question, msg.tabId);
+        sendResponse(out);
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
+      }
+      return;
+    }
+    case MSG.GET_MODELS: {
+      const v = config.vision || {};
+      const provider = v.provider || 'mock';
+      const list = await vision.discoverModels({ provider, baseUrl: v.baseUrl, apiKey: v.apiKey });
+      sendResponse({ ok: true, provider, models: list, current: v.model || defaultModels()[provider] || '' });
+      return;
+    }
+    case MSG.RUN_DIGEST: {
+      try {
+        const rec = await runDigest();
+        sendResponse({ ok: true, insightId: rec && rec.id });
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
+      }
+      return;
+    }
+    case MSG.GET_PREVIEW: {
+      try {
+        const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        const t = tabs[0];
+        const res = await chrome.tabs.sendMessage(t.id, { type: MSG.SCAN_PAGE, maxElements: msg.maxElements || 30 });
+        sendResponse({ url: t.url, title: t.title, summary: res && res.summary });
+      } catch (e) {
+        sendResponse({ error: e.message });
+      }
+      return;
+    }
     default:
       return false;
   }
@@ -675,6 +782,7 @@ function getStatePayload() {
     screenshots: session ? session.screenshots : 0,
     insights: session ? session.insights : 0,
     pages: session ? session.pages.slice(-8) : [],
+    focus: session ? focusScoreOf(session.pages) : null,
     deviceId,
     userId,
     config: {

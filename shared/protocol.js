@@ -38,6 +38,10 @@ export const MSG = {
   GET_SCREENSHOTS: 'vaia:get_screenshots',
   GET_SCREENSHOT: 'vaia:get_screenshot',
   GET_STATS: 'vaia:get_stats',
+  ASK_AGENT: 'vaia:ask_agent',
+  GET_MODELS: 'vaia:get_models',
+  RUN_DIGEST: 'vaia:run_digest',
+  GET_PREVIEW: 'vaia:get_preview',
 };
 
 /** High-level telemetry event kinds emitted by the tracker. */

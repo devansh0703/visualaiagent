@@ -3,8 +3,85 @@
  * providers: OpenAI, Anthropic, Google Gemini, OpenRouter, Ollama and a local
  * mock (no key / offline). Every provider is asked to return the same JSON
  * schema, which we parse defensively.
+ *
+ * Model strategy: `vision.autoModel` (default on) auto-discovers the SMALLEST
+ * vision-capable model the provider offers (cheapest / fastest) and uses it.
+ * If a call fails with a non-rate-limit error, `vision.modelFallbacks` walks a
+ * per-provider fallback chain before giving up.
  */
 import { defaultModels } from '../shared/config.js';
+import { now } from '../shared/utils.js';
+
+/** Per-provider fallback chains, cheapest/smallest first. */
+const FALLBACK_MODELS = {
+  openai: ['gpt-4o-mini', 'gpt-4o'],
+  anthropic: ['claude-sonnet-4-5'],
+  gemini: ['gemini-2.5-flash'],
+  groq: ['qwen/qwen3.6-27b'],
+  openrouter: ['openai/gpt-4o-mini', 'openai/gpt-4o'],
+  ollama: ['llama3.2-vision'],
+  mock: ['mock-vision'],
+};
+
+/** Providers whose /models endpoint we can query to auto-pick the smallest model. */
+const DISCOVERABLE = new Set(['openai', 'groq', 'openrouter']);
+const modelCache = new Map(); // key -> { ts, list }
+
+async function discoverModels({ provider, baseUrl, apiKey }) {
+  if (!DISCOVERABLE.has(provider)) return [];
+  const base = (baseUrl || { openai: 'https://api.openai.com/v1', groq: 'https://api.groq.com/openai/v1', openrouter: 'https://openrouter.ai/api/v1' }[provider]);
+  const cacheKey = `${provider}|${base}`;
+  const hit = modelCache.get(cacheKey);
+  if (hit && now() - hit.ts < 6 * 60 * 60 * 1000) return hit.list;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12000);
+    const res = await fetch(`${base}/models`, {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return [];
+    const json = await res.json();
+    const list = (json.data || [])
+      .filter((m) => Array.isArray(m.input_modalities) && m.input_modalities.includes('image'))
+      .sort((a, b) => (a.context_window || 1e12) - (b.context_window || 1e12))
+      .map((m) => ({ id: m.id, contextWindow: m.context_window || 0, maxTokens: m.max_completion_tokens || 0 }));
+    if (list.length) modelCache.set(cacheKey, { ts: now(), list });
+    return list;
+  } catch {
+    return [];
+  }
+}
+
+function dedupeModels(list) {
+  const seen = new Set();
+  const out = [];
+  for (const m of list) {
+    if (!m || seen.has(m)) continue;
+    seen.add(m);
+    out.push(m);
+  }
+  return out;
+}
+
+/** Build the ordered list of model candidates for a provider. */
+export async function buildModelCandidates(vision, provider) {
+  const configured = (vision && vision.model) || defaultModels()[provider] || defaultModels().mock;
+  const list = [configured];
+  if (vision && vision.autoModel !== false) {
+    const found = await discoverModels({ provider, baseUrl: vision.baseUrl, apiKey: vision.apiKey });
+    if (found.length) list.unshift(found[0].id); // smallest first
+  }
+  if (vision && vision.modelFallbacks !== false) {
+    for (const m of FALLBACK_MODELS[provider] || []) list.push(m);
+  }
+  return dedupeModels(list);
+}
+
+function isRateLimit(err) {
+  return /429|rate.?limit/i.test((err && err.message) || '');
+}
 
 const SYSTEM_PROMPT = `You are the visual perception module of a browser screen-intelligence agent.
 You receive a screenshot of a user's browser tab plus a small log of recent activity.
@@ -45,6 +122,9 @@ function buildPrompt(context) {
   ];
   for (const ev of context.recentEvents || []) {
     lines.push(`  - ${ev.tsRel || ''} ${ev.type}: ${ev.summary || ''}`);
+  }
+  if (context.question) {
+    lines.push(`\nUSER QUESTION: ${context.question}\nAnswer this question based on the screenshot and activity above.`);
   }
   return lines.join('\n');
 }
@@ -204,10 +284,11 @@ async function ollama({ model, baseUrl, apiKey, userContent, temperature, maxTok
 
 function mockVision(context, prompt) {
   const visibleText = prompt;
+  const answered = context.question ? `\n${context.question} → (offline) The screenshot shows ${context.title || 'this page'} with no live vision analysis.` : '';
   return JSON.stringify({
     screen: {
       type: context.url ? 'browser' : 'other',
-      summary: `[mock] Analyzed a screenshot on ${context.title || 'this page'} (offline analysis).`,
+      summary: `[mock] Analyzed a screenshot on ${context.title || 'this page'} (offline analysis).` + answered,
       text: String(visibleText).slice(0, 400),
       keyElements: [],
     },
@@ -223,12 +304,11 @@ function mockVision(context, prompt) {
 
 /* ------------------------------ main entry ------------------------------ */
 
-export { extractJSON, dataUrlParts };
+export { extractJSON, dataUrlParts, discoverModels };
 
 export async function analyze({ config, context }) {
   const vision = config.vision || {};
   const provider = vision.provider || 'mock';
-  const model = vision.model || defaultModels()[provider] || defaultModels().mock;
   let promptText = buildPrompt(context);
   let systemPrompt = SYSTEM_PROMPT;
   if (vision.language && vision.language.toLowerCase() !== 'en') {
@@ -240,94 +320,123 @@ export async function analyze({ config, context }) {
     userContent.push({ type: 'image', image_url: { url: context.dataUrl } });
   }
 
-  let text = '';
-  try {
-    switch (provider) {
-      case 'anthropic':
-        text = await anthropic({
-          model,
-          baseUrl: vision.baseUrl,
-          apiKey: vision.apiKey,
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
-          temperature: vision.temperature,
-          maxTokens: vision.maxTokens,
-          timeoutMs: vision.timeoutMs,
-        });
-        break;
-      case 'gemini':
-        text = await gemini({
-          model,
-          baseUrl: vision.baseUrl,
-          apiKey: vision.apiKey,
-          userContent,
-          temperature: vision.temperature,
-          maxTokens: vision.maxTokens,
-          timeoutMs: vision.timeoutMs,
-        });
-        break;
-      case 'ollama':
-        text = await ollama({
-          model,
-          baseUrl: vision.baseUrl,
-          apiKey: vision.apiKey,
-          userContent,
-          temperature: vision.temperature,
-          maxTokens: vision.maxTokens,
-          timeoutMs: vision.timeoutMs,
-        });
-        break;
-      case 'openrouter':
-        text = await openaiCompatible({
-          model,
-          baseUrl: vision.baseUrl || 'https://openrouter.ai/api/v1',
-          apiKey: vision.apiKey,
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
-          temperature: vision.temperature,
-          maxTokens: vision.maxTokens,
-          timeoutMs: vision.timeoutMs,
-        });
-        break;
-      case 'groq':
-        text = await openaiCompatible({
-          model,
-          baseUrl: vision.baseUrl || 'https://api.groq.com/openai/v1',
-          apiKey: vision.apiKey,
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
-          temperature: vision.temperature,
-          maxTokens: vision.maxTokens,
-          timeoutMs: vision.timeoutMs,
-          responseFormat: false,
-        });
-        break;
-      case 'mock':
-        text = mockVision(context, promptText);
-        break;
-      case 'openai':
-      default:
-        text = await openaiCompatible({
-          model,
-          baseUrl: vision.baseUrl,
-          apiKey: vision.apiKey,
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
-          temperature: vision.temperature,
-          maxTokens: vision.maxTokens,
-          timeoutMs: vision.timeoutMs,
-        });
+  const candidates = await buildModelCandidates(vision, provider);
+  let lastErr = null;
+  let retriedParse = false;
+  for (let i = 0; i < candidates.length; i++) {
+    const model = candidates[i];
+    let text = '';
+    try {
+      switch (provider) {
+        case 'anthropic':
+          text = await anthropic({
+            model,
+            baseUrl: vision.baseUrl,
+            apiKey: vision.apiKey,
+            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
+            temperature: vision.temperature,
+            maxTokens: vision.maxTokens,
+            timeoutMs: vision.timeoutMs,
+          });
+          break;
+        case 'gemini':
+          text = await gemini({
+            model,
+            baseUrl: vision.baseUrl,
+            apiKey: vision.apiKey,
+            userContent,
+            temperature: vision.temperature,
+            maxTokens: vision.maxTokens,
+            timeoutMs: vision.timeoutMs,
+          });
+          break;
+        case 'ollama':
+          text = await ollama({
+            model,
+            baseUrl: vision.baseUrl,
+            apiKey: vision.apiKey,
+            userContent,
+            temperature: vision.temperature,
+            maxTokens: vision.maxTokens,
+            timeoutMs: vision.timeoutMs,
+          });
+          break;
+        case 'openrouter':
+          text = await openaiCompatible({
+            model,
+            baseUrl: vision.baseUrl || 'https://openrouter.ai/api/v1',
+            apiKey: vision.apiKey,
+            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
+            temperature: vision.temperature,
+            maxTokens: vision.maxTokens,
+            timeoutMs: vision.timeoutMs,
+          });
+          break;
+        case 'groq':
+          text = await openaiCompatible({
+            model,
+            baseUrl: vision.baseUrl || 'https://api.groq.com/openai/v1',
+            apiKey: vision.apiKey,
+            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
+            temperature: vision.temperature,
+            maxTokens: vision.maxTokens,
+            timeoutMs: vision.timeoutMs,
+            responseFormat: false,
+          });
+          break;
+        case 'mock':
+          text = mockVision(context, promptText);
+          break;
+        case 'openai':
+        default:
+          text = await openaiCompatible({
+            model,
+            baseUrl: vision.baseUrl,
+            apiKey: vision.apiKey,
+            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
+            temperature: vision.temperature,
+            maxTokens: vision.maxTokens,
+            timeoutMs: vision.timeoutMs,
+          });
+      }
+    } catch (e) {
+      lastErr = e;
+      if (isRateLimit(e) || i === candidates.length - 1) break; // don't burn quota on fallbacks
+      captureWarn(`${provider}: model ${model} failed (${e.message.slice(0, 120)}) — trying fallback`);
+      continue;
     }
-  } catch (e) {
-    throw new Error(`${provider}: ${e.message}`);
-  }
 
-  const json = extractJSON(text);
-  if (!json) {
-    throw new Error(`${provider}: unparseable model output`);
+    const json = extractJSON(text);
+    if (!json) {
+      // Reasoning models (e.g. Groq qwen) occasionally return non-JSON after
+      // <think> blocks despite being told not to — retry the final candidate
+      // once instead of failing the whole analysis.
+      captureWarn(`${provider}: model ${model} returned unparseable output (${text.length} chars)`);
+      if (i === candidates.length - 1 && !retriedParse) {
+        retriedParse = true;
+        i--;
+        continue;
+      }
+      lastErr = new Error(`${provider}: unparseable model output`);
+      if (i === candidates.length - 1) break;
+      continue;
+    }
+    return {
+      provider,
+      model,
+      ts: Date.now(),
+      raw: json,
+      summary: json.screen?.summary || json.user?.intent || 'Screen analyzed',
+      confidence: 1 - (json.signals?.confusion || 0),
+    };
   }
-  return {
-    provider,
-    model,
-    ts: Date.now(),
-    raw: json,
-    summary: json.screen?.summary || json.user?.intent || 'Screen analyzed',
-    confidence: 1 - (json.signals?.confusion || 0),
-  };
+  const lastMsg = lastErr ? lastErr.message : 'all models failed';
+  throw new Error(lastMsg.startsWith(`${provider}:`) ? lastMsg : `${provider}: ${lastMsg}`);
+}
+
+function captureWarn(msg) {
+  try {
+    // eslint-disable-next-line no-console
+    console.warn(`[vaia] ${msg}`);
+  } catch {}
 }

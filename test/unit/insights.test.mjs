@@ -11,6 +11,8 @@ function makeEngine() {
       errorSpikeThreshold: 5,
       rapidNavWindowMs: 30000,
       rapidNavThreshold: 6,
+      scrollSpikeWindowMs: 3000,
+      scrollSpikeThreshold: 8,
       generateEndOfSessionSummary: false,
     },
   };
@@ -85,4 +87,22 @@ test('detectors never throw on malformed events', () => {
   engine.ingest({ type: 'click' });
   engine.ingest({ type: 'page_leave' });
   assert.equal(engine.recent.length >= 2, true);
+});
+
+test('scroll spike detector fires on rapid large scrolls', () => {
+  const { engine, records } = makeEngine();
+  for (let i = 0; i < 9; i++) {
+    engine.ingest({ ...ev('scroll', 1000 + i * 200), data: { dy: i % 2 ? 600 : -500, y: 100 * i } });
+  }
+  assert.equal(records.some((r) => r.type === 'scroll_spike'), true);
+  const rec = records.find((r) => r.type === 'scroll_spike');
+  assert.equal(rec.signal, 'hesitation');
+});
+
+test('scroll spike ignores small scrolls', () => {
+  const { engine, records } = makeEngine();
+  for (let i = 0; i < 20; i++) {
+    engine.ingest({ ...ev('scroll', 1000 + i * 100), data: { dy: 10, y: i } });
+  }
+  assert.equal(records.some((r) => r.type === 'scroll_spike'), false);
 });

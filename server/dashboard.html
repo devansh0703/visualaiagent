@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>VAIA Dashboard</title>
+<style>
+:root {
+  --bg:#0f1720; --bg2:#15232e; --panel:#1b2c3a; --panel2:#20364a; --border:#2c4258;
+  --text:#d7e4ee; --muted:#8aa3b8; --accent:#35c2b0; --good:#43d17c; --warn:#e5a83d; --bad:#e0556b;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.wrap{max-width:1120px;margin:0 auto;padding:18px}
+h1{font-size:18px;color:#fff;margin:0}
+header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+header .sub{color:var(--muted);font-size:12px}
+.grow{flex:1}
+button{background:var(--panel2);color:#fff;border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer}
+button:hover{filter:brightness(1.2)}
+button.primary{background:var(--accent);color:#07251f;font-weight:600}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}
+.stat{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;text-align:center}
+.stat .v{font-size:24px;font-weight:700;color:#fff}
+.stat .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.stat.good .v{color:var(--good)} .stat.bad .v{color:var(--bad)}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:10px}
+.tabs button{border:none;background:transparent;border-radius:8px 8px 0 0;padding:8px 14px;color:var(--muted);border-bottom:2px solid transparent}
+.tabs button.active{color:#fff;border-bottom-color:var(--accent);background:var(--panel)}
+.tab{display:none} .tab.active{display:block}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+th{color:var(--muted);font-weight:500}
+td.wrap{white-space:normal;max-width:340px;overflow:hidden;text-overflow:ellipsis}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px}
+.muted{color:var(--muted)}
+.tag{display:inline-block;font-size:10px;padding:2px 7px;border-radius:20px;background:var(--panel2);border:1px solid var(--border);color:var(--muted)}
+.tag.good{color:var(--good);border-color:rgba(67,209,124,.4)}
+.tag.bad{color:var(--bad);border-color:rgba(224,85,107,.4)}
+.tag.warn{color:var(--warn);border-color:rgba(229,168,61,.4)}
+.tag.accent{color:var(--accent);border-color:rgba(53,194,176,.4)}
+.insights{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.insight{background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--muted);border-radius:8px;padding:10px}
+.insight.negative{border-left-color:var(--bad)}
+.insight.hesitation{border-left-color:var(--warn)}
+.insight.positive{border-left-color:var(--good)}
+.insight h3{margin:0 0 4px;font-size:13px;color:#fff}
+.insight p{margin:0;font-size:12px;color:var(--text)}
+.insight .meta{font-size:10px;color:var(--muted);margin-top:6px}
+.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.shots figure{margin:0}
+.shots img{width:100%;height:100px;object-fit:cover;border:1px solid var(--border);border-radius:6px;cursor:zoom-in;background:var(--bg2)}
+.shots figcaption{font-size:10px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bytype{display:flex;flex-wrap:wrap;gap:6px}
+.bar{display:flex;align-items:center;gap:6px;font-size:11px;min-width:160px}
+.bar .label{color:var(--muted);width:90px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar .track{flex:1;height:10px;background:var(--bg2);border-radius:5px;overflow:hidden}
+.bar .fill{height:100%;background:var(--accent)}
+.heat-wrap{position:relative;width:100%;height:520px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.heat-wrap canvas{width:100%;height:100%}
+.row{display:flex;gap:8px;align-items:center}
+input,select{background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px}
+.lb{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:20}
+.lb img{max-width:92vw;max-height:92vh;border-radius:6px}
+.empty{padding:16px;color:var(--muted);font-size:12px}
+a{color:var(--accent)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Visual AI Agent — Dashboard</h1>
+    <span class="sub" id="sub"></span>
+    <span class="grow"></span>
+    <a href="/api/export?format=json" id="btnJson">Export JSON</a>
+    <a href="/api/export?format=csv" id="btnCsv">Export CSV</a>
+    <button id="btnRefresh">Refresh</button>
+  </header>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;margin-bottom:8px">
+      <strong style="font-size:13px">Event mix</strong>
+      <a href="/api/heatmap" target="_blank" class="mono">heatmap api</a>
+    </div>
+    <div class="bytype" id="byType"></div>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <button data-tab="events" class="active">Events</button>
+    <button data-tab="insights">Insights</button>
+    <button data-tab="sessions">Sessions</button>
+    <button data-tab="screenshots">Screenshots</button>
+    <button data-tab="heatmap">Heatmap</button>
+  </div>
+
+  <div class="tab active" id="tab-events">
+    <div class="card">
+      <div class="row" style="margin-bottom:8px">
+        <select id="typeFilter"><option value="">all types</option></select>
+        <span class="grow"></span>
+        <span class="muted" id="evCount"></span>
+      </div>
+      <table><thead><tr><th>time</th><th>type</th><th>url</th><th>title</th><th>session</th></tr></thead><tbody id="eventsBody"></tbody></table>
+    </div>
+  </div>
+
+  <div class="tab" id="tab-insights">
+    <div class="insights" id="insightsBody"></div>
+  </div>
+
+  <div class="tab" id="tab-sessions">
+    <div class="card">
+      <table><thead><tr><th>start</th><th>id</th><th>duration</th><th>events</th><th>errors</th><th>rage</th><th>focus</th></tr></thead><tbody id="sessionsBody"></tbody></table>
+    </div>
+  </div>
+
+  <div class="tab" id="tab-screenshots">
+    <div class="shots" id="shotsBody"></div>
+  </div>
+
+  <div class="tab" id="tab-heatmap">
+    <div class="card">
+      <div class="row" style="margin-bottom:8px">
+        <strong style="font-size:13px">Click heatmap (last 500 points)</strong>
+      </div>
+      <div class="heat-wrap"><canvas id="heatCanvas"></canvas></div>
+    </div>
+  </div>
+</div>
+<div class="lb" id="lb"><img id="lbImg" src="" alt="screenshot" /></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let stats = null;
+
+async function get(url) {
+  const r = await fetch(url);
+  return r.json();
+}
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function ts(t) { return t ? new Date(t).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'; }
+function dur(ms) { if (!ms && ms!==0) return '—'; const s=Math.floor(ms/1000); const m=Math.floor(s/60); return m? `${m}m ${s%60}s` : `${s}s`; }
+function fmt(n) { return (n==null)?'0':n.toLocaleString(); }
+function signalClass(s) { return (s||'neutral').replace(/[^a-z]/g,''); }
+
+function renderStats(s) {
+  const cards = [
+    ['events','Events', s.events, ''],
+    ['screenshots','Screenshots', s.screenshots, ''],
+    ['insights','Insights', s.insights, ''],
+    ['sessions','Sessions', s.sessions, s.errors>0?'bad':''],
+  ];
+  $('stats').innerHTML = cards.map(([k,v,val,tone]) =>
+    `<div class="stat ${tone}"><div class="v">${fmt(val)}</div><div class="l">${v}</div></div>`).join('');
+  $('sub').textContent = `total errors ${s.errors}`;
+}
+
+function renderByType(s) {
+  const max = Math.max(1, ...(s.byType||[]).map((r)=>r.n));
+  $('byType').innerHTML = (s.byType||[]).slice(0,24).map((r)=>
+    `<div class="bar"><span class="label" title="${esc(r.type)}">${esc(r.type)}</span><div class="track"><div class="fill" style="width:${(r.n/max*100).toFixed(1)}%"></div></div><span class="mono muted">${r.n}</span></div>`).join('') || '<div class="empty">no events yet</div>';
+}
+
+function fillTypeFilter(types) {
+  const sel = $('typeFilter');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">all types</option>' + [...new Set(types)].sort().map((t)=>`<option>${esc(t)}</option>`).join('');
+  sel.value = cur;
+}
+
+async function renderEvents() {
+  const res = await get('/api/events?limit=300');
+  const rows = res.rows || [];
+  fillTypeFilter(rows.map((r)=>r.type));
+  const filter = $('typeFilter').value;
+  const list = filter ? rows.filter((r)=>r.type===filter) : rows;
+  $('evCount').textContent = `${list.length} shown`;
+  $('eventsBody').innerHTML = list.map((r)=>
+    `<tr><td class="mono muted">${ts(r.ts)}</td><td><span class="tag">${esc(r.type)}</span></td><td class="wrap"><a href="${esc(r.url||'')}" target="_blank">${esc(r.url||'—')}</a></td><td class="wrap">${esc(r.title||'')}</td><td class="mono muted">${esc((r.session_id||'').slice(0,8))}</td></tr>`).join('')
+    || '<tr><td colspan="5"><div class="empty">no events</div></td></tr>';
+}
+
+async function renderInsights() {
+  const res = await get('/api/insights?limit=80');
+  const rows = res.rows || [];
+  $('insightsBody').innerHTML = rows.map((r)=>
+    `<div class="insight ${signalClass(r.signal)}">
+       <h3>${esc(r.title||'insight')}</h3>
+       <p>${esc(r.body||'')}</p>
+       <div class="meta">${ts(r.ts)} · ${esc(r.kind||'')} · ${esc(r.type||'')} · conf ${r.confidence??'—'}</div>
+     </div>`).join('') || '<div class="empty">no insights yet</div>';
+}
+
+async function renderSessions() {
+  const res = await get('/api/sessions?limit=50');
+  const rows = res.rows || [];
+  $('sessionsBody').innerHTML = rows.map((r)=>{
+    const focus = r.payload ? JSON.parse(r.payload).focus : null;
+    const focusTxt = focus ? (focus.score*100).toFixed(0)+'%' : '—';
+    return `<tr>
+      <td class="mono muted">${ts(r.started_at)}</td>
+      <td class="mono">${esc(r.id.slice(0,8))}</td>
+      <td>${dur(r.duration_ms)}</td>
+      <td>${fmt(r.events)}</td>
+      <td class="${r.errors>0?'muted':'muted'}">${r.errors}</td>
+      <td>${r.rage_clicks||0}</td>
+      <td>${focusTxt}</td></tr>`;
+  }).join('') || '<tr><td colspan="7"><div class="empty">no sessions</div></td></tr>';
+}
+
+async function renderShots() {
+  const res = await get('/api/screenshots?limit=60');
+  const rows = res.rows || [];
+  $('shotsBody').innerHTML = rows.map((r)=>{
+    const file = (r.path||'').split('/').pop();
+    const src = '/shots/' + encodeURIComponent(file);
+    return `<figure><img src="${src}" loading="lazy" onclick="openLb('${src}')" /><figcaption>${ts(r.ts)} · ${esc(r.reason||'')}</figcaption></figure>`;
+  }).join('') || '<div class="empty">no screenshots yet</div>';
+}
+
+async function renderHeatmap() {
+  const res = await get('/api/heatmap');
+  const rows = res.rows || [];
+  const canvas = $('heatCanvas');
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  canvas.width = W * devicePixelRatio; canvas.height = H * devicePixelRatio;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  ctx.clearRect(0,0,W,H);
+  if (!rows.length) { ctx.fillStyle='#8aa3b8'; ctx.font='13px sans-serif'; ctx.fillText('no click data', 16, 24); return; }
+  const maxN = Math.max(1, ...rows.map((r)=>r.n));
+  // normalize into a 1200x800 space (dashboard-style), fitted to canvas
+  for (const r of rows) {
+    const x = (r.x/1200)*W, y = (r.y/800)*H;
+    const rad = 3 + (r.n/maxN)*18;
+    const g = ctx.createRadialGradient(x,y,0,x,y,rad);
+    g.addColorStop(0, 'rgba(229,168,61,0.55)');
+    g.addColorStop(1, 'rgba(229,168,61,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x,y,rad,0,Math.PI*2); ctx.fill();
+  }
+}
+
+function openLb(src) { $('lbImg').src = src; $('lb').style.display='flex'; }
+$('lb').addEventListener('click', () => $('lb').style.display='none');
+
+$('tabs').querySelectorAll('button').forEach((b)=>{
+  b.addEventListener('click', ()=>{
+    $('tabs').querySelectorAll('button').forEach((x)=>x.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach((x)=>x.classList.remove('active'));
+    b.classList.add('active');
+    $('tab-'+b.dataset.tab).classList.add('active');
+  });
+});
+
+async function refresh() {
+  try {
+    stats = await get('/api/stats');
+    renderStats(stats);
+    renderByType(stats);
+    await Promise.all([renderEvents(), renderInsights(), renderSessions(), renderShots(), renderHeatmap()]);
+  } catch (e) { $('sub').textContent = 'dashboard error: '+e.message; }
+}
+$('btnRefresh').addEventListener('click', refresh);
+refresh();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>

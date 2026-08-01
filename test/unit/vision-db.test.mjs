@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractJSON, dataUrlParts, analyze } from '../../background/vision.js';
+import { extractJSON, dataUrlParts, analyze, buildModelCandidates } from '../../background/vision.js';
 import { baseOf } from '../../background/db.js';
 import { isSensitiveUrl } from '../../background/capture.js';
 import { visionProviders, defaultModels } from '../../shared/config.js';
@@ -83,4 +83,29 @@ test('isSensitiveUrl matches exact hosts and subdomains', () => {
   assert.equal(isSensitiveUrl('https://notbank.example.com.evil.net/', domains), false);
   assert.equal(isSensitiveUrl('https://safe.com/', []), false);
   assert.equal(isSensitiveUrl('not-a-url', domains), false);
+});
+
+test('buildModelCandidates honors explicit model with autoModel off', async () => {
+  const list = await buildModelCandidates({ model: 'my/custom-model', autoModel: false, modelFallbacks: false }, 'groq');
+  assert.deepEqual(list, ['my/custom-model']);
+});
+
+test('buildModelCandidates appends groq fallback chain after default', async () => {
+  const list = await buildModelCandidates({ autoModel: false }, 'groq');
+  assert.deepEqual(list, ['qwen/qwen3.6-27b']);
+});
+
+test('buildModelCandidates dedupes when auto-discovered smallest already in fallbacks', async () => {
+  const list = await buildModelCandidates({ autoModel: false, modelFallbacks: true }, 'openai');
+  assert.deepEqual(list, ['gpt-4o', 'gpt-4o-mini']);
+});
+
+test('analyze answers a question via the mock provider', async () => {
+  const res = await analyze({
+    config: { vision: { provider: 'mock', autoModel: false } },
+    context: { url: 'https://x.com', title: 'Page', question: 'What should I do next?' },
+  });
+  assert.equal(res.provider, 'mock');
+  assert.match(res.summary, /offline/);
+  assert.match(res.summary, /What should I do next\?/);
 });

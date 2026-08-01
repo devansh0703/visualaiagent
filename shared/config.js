@@ -43,6 +43,7 @@ export const DEFAULTS = {
     storeLocal: true,
     storeLocalMaxFrames: 600,
     trimDataUris: true,
+    skipDuplicateFrames: true,
   },
 
   vision: {
@@ -57,6 +58,8 @@ export const DEFAULTS = {
     temperature: 0.2,
     maxTokens: 1024,
     language: 'en',
+    autoModel: true,
+    modelFallbacks: true,
   },
 
   privacy: {
@@ -95,7 +98,15 @@ export const DEFAULTS = {
     errorSpikeThreshold: 5,
     rapidNavThreshold: 6,
     rapidNavWindowMs: 30000,
+    scrollSpikeWindowMs: 3000,
+    scrollSpikeThreshold: 8,
     generateEndOfSessionSummary: true,
+  },
+
+  digest: {
+    enabled: true,
+    hourOfDay: 20,
+    windowHours: 24,
   },
 
   recorder: {

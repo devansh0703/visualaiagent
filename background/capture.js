@@ -11,6 +11,9 @@ let offscreenReady = false;
 let lastSignificantCapture = 0;
 let captureLoopTimer = null;
 let captureCounter = 0;
+const lastPhashBySession = new Map(); // sessionId -> phash of last stored frame
+
+const NO_DUP_REASONS = new Set(['manual', 'session_end', 'significant', 'tab_activated', 'agent_ask']);
 
 export async function ensureOffscreen() {
   if (offscreenReady) return true;
@@ -117,21 +120,36 @@ export async function captureNow({ tabId, reason = 'scheduled', session, config,
     dataUrl: processed.dataUrl,
     width: processed.width,
     height: processed.height,
+    phash: processed.phash || '',
     analyzed: false,
+    duplicate: false,
     analysis: null,
   };
+
+  // Skip storing/analyzing identical scheduled frames — a static page produces
+  // the same dHash every interval, so this cuts storage AND vision spend.
+  const skipDup =
+    config.capture.skipDuplicateFrames !== false &&
+    !NO_DUP_REASONS.has(reason) &&
+    !!record.phash &&
+    lastPhashBySession.get(session.id) === record.phash;
+  record.duplicate = skipDup;
+
   session.screenshots++;
   session.touch();
 
-  if (config.capture.storeLocal) {
+  if (!skipDup && config.capture.storeLocal) {
     await idb.put('screenshots', record);
     // trim per-session frames
     await trimFrames(session.id, config.capture.storeLocalMaxFrames || 600);
+    if (record.phash) lastPhashBySession.set(session.id, record.phash);
   }
 
   captureCounter++;
   let analyzed = null;
-  if (onAnalyze && config.vision && config.vision.enabled) {
+  if (skipDup) {
+    captureLog('debug', 'capture skipped: unchanged frame');
+  } else if (onAnalyze && config.vision && config.vision.enabled) {
     if (captureCounter % Math.max(1, config.vision.analyzeScreenEveryNth || 5) === 0 || reason === 'session_end') {
       try {
         analyzed = await onAnalyze(record, reason);

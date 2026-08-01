@@ -32,7 +32,34 @@ async function processImage({ id, dataUrl, maxWidth, quality }) {
   const ctx = canvas.getContext('2d');
   ctx.drawImage(img, 0, 0, w, h);
   const out = canvas.toDataURL('image/jpeg', (quality || 60) / 100);
-  return { id, dataUrl: out, width: w, height: h, mime: 'image/jpeg' };
+  return { id, dataUrl: out, width: w, height: h, mime: 'image/jpeg', phash: diffHash(canvas) };
+}
+
+/**
+ * 64-bit difference hash: downscale to 9x8 grayscale and compare horizontal
+ * neighbours. Robust to encoding noise, sensitive to real layout changes.
+ */
+function diffHash(canvas) {
+  const gw = 9;
+  const gh = 8;
+  const c = document.createElement('canvas');
+  c.width = gw;
+  c.height = gh;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(canvas, 0, 0, gw, gh);
+  const data = ctx.getImageData(0, 0, gw, gh).data;
+  let bits = '';
+  for (let y = 0; y < gh; y++) {
+    const row = y * gw * 4;
+    for (let x = 0; x < gw - 1; x++) {
+      const a = data[row + x * 4] + data[row + x * 4 + 1] + data[row + x * 4 + 2];
+      const b = data[row + (x + 1) * 4] + data[row + (x + 1) * 4 + 1] + data[row + (x + 1) * 4 + 2];
+      bits += a > b ? '1' : '0';
+    }
+  }
+  let hex = '';
+  for (let i = 0; i < bits.length; i += 4) hex += parseInt(bits.slice(i, i + 4), 2).toString(16);
+  return hex;
 }
 
 function loadImage(dataUrl) {

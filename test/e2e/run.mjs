@@ -247,6 +247,26 @@ async function main() {
     // 10. heatmap data message round-trip
     const hm = await extCall(extPage, { type: 'vaia:heatmap', action: 'data' });
     check('heatmap data endpoint responds', !hm.error, JSON.stringify(hm.error || (hm.clicks || []).length + ' clicks'));
+
+    // 11. ask-the-agent round trip (mock vision)
+    console.log('[e2e] agent chat + digest…');
+    const ask = await extCall(extPage, { type: 'vaia:ask_agent', question: 'What is on this page?' });
+    check('ask agent returns an answer', !!ask.ok && !!ask.answer, JSON.stringify(ask).slice(0, 120));
+
+    // 12. model discovery endpoint responds
+    const models = await extCall(extPage, { type: 'vaia:get_models' });
+    check('get_models endpoint responds', !!models && models.ok, JSON.stringify(models && models.error));
+
+    // 13. daily digest generates an insight
+    const digest = await extCall(extPage, { type: 'vaia:run_digest' });
+    check('daily digest generated', !!digest.ok && !!digest.insightId, JSON.stringify(digest));
+
+    // 14. server dashboard + export
+    const dash = await fetch(`http://127.0.0.1:${PORT}/`);
+    const dashHtml = await dash.text();
+    check('dashboard served at /', dash.ok && dashHtml.includes('VAIA Dashboard'));
+    const exp = await (await fetch(`http://127.0.0.1:${PORT}/api/export?format=json`)).json();
+    check('export endpoint returns tables', !!exp && Array.isArray(exp.data && exp.data.events), JSON.stringify(exp && Object.keys(exp.data || {})));
   } catch (e) {
     failures++;
     console.error('[e2e] FAILED:', e.message);

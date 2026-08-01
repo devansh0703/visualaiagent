@@ -14,10 +14,20 @@
       <div class="row" style="gap:6px">
         <span class="dot pulse" id="statusDot"></span>
         <span class="muted" id="statusText">connecting…</span>
+        <span class="tag mono" id="modelTag" style="margin-left:6px" title="vision model"></span>
       </div>
     </div>
     <button class="ghost pill-btn" id="btnOptions" title="Options">⚙</button>
   </header>
+
+  <div class="card" id="askCard">
+    <h3>Ask the agent about this tab</h3>
+    <div class="row" style="gap:6px">
+      <input type="text" id="askInput" placeholder="e.g. what should I do next on this page?" />
+      <button id="btnAsk" class="primary" style="white-space:nowrap">Ask</button>
+    </div>
+    <div id="askAnswer" class="muted" style="margin-top:6px;font-size:12px;white-space:pre-wrap;display:none"></div>
+  </div>
 
   <div id="scanModal" class="scan-modal hidden">
     <div class="scan-box card">
@@ -32,14 +42,19 @@
   <div class="grid grid4 stats-grid" id="stats"></div>
 
   <div class="card">
-    <h3>Session</h3>
+    <h3>Session <span class="tag mono" id="sessionId">—</span></h3>
     <div class="row wrap" style="gap:6px">
-      <span class="tag mono" id="sessionId">—</span>
       <span class="tag" id="sessionStart">started —</span>
       <span class="tag" id="sessionDuration">—</span>
+      <span class="tag" id="focusTag">focus —</span>
     </div>
     <h3 style="margin-top:10px">Recent pages</h3>
     <div class="col" id="pages" style="font-size:12px"></div>
+  </div>
+
+  <div class="card">
+    <h3>Recent insights</h3>
+    <div class="col" id="insightsFeed" style="font-size:12px"></div>
   </div>
 
   <div class="card">
@@ -52,6 +67,7 @@
     <div class="row" style="margin-top:8px">
       <button id="btnFlush" class="ghost pill-btn">Flush now</button>
       <button id="btnExport" class="ghost pill-btn">Export JSON</button>
+      <button id="btnDigest" class="ghost pill-btn" title="Generate a daily digest now">Digest</button>
     </div>
   </div>
 

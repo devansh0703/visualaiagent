@@ -15,7 +15,7 @@
  */
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,6 +23,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = join(ROOT, 'data');
 const SHOTS = join(DATA, 'screenshots');
 mkdirSync(SHOTS, { recursive: true });
+const DASHBOARD_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'dashboard.html'), 'utf8');
 
 const db = new DatabaseSync(join(DATA, 'telemetry.db'));
 db.exec(`
@@ -227,10 +228,64 @@ function serveStats(res) {
     screenshots: one('SELECT COUNT(*) as count FROM screenshots'),
     insights: one('SELECT COUNT(*) as count FROM insights'),
     sessions: one('SELECT COUNT(*) as count FROM sessions'),
+    errors: one(`SELECT COUNT(*) as count FROM events WHERE type IN ('error','unhandled_rejection','console_error','resource_error')`),
     byType,
     byDay,
     recentScreenshot: db.prepare('SELECT id, ts, url, width, height, path FROM screenshots ORDER BY ts DESC LIMIT 1').get(),
   });
+}
+
+const EXPORT_TABLES = ['events', 'screenshots', 'insights', 'sessions'];
+const ORDER_COL = { events: 'ts', screenshots: 'ts', insights: 'ts', sessions: 'started_at' };
+
+function serveExport(res, opts) {
+  const format = opts.format === 'csv' ? 'csv' : 'json';
+  const tables = EXPORT_TABLES.filter((t) => !opts.table || opts.table === t);
+  const out = {};
+  for (const t of tables) {
+    const rows = db.prepare(`SELECT * FROM ${t} ORDER BY ${ORDER_COL[t] || 'ts'} DESC`).all();
+    out[t] = rows;
+  }
+  if (format === 'csv') {
+    // Flatten each table into CSV with a header line per table.
+    const parts = [];
+    for (const t of tables) {
+      const rows = out[t];
+      if (!rows.length) continue;
+      parts.push(`# ${t}`);
+      const headers = Object.keys(rows[0]);
+      parts.push(headers.join(','));
+      for (const r of rows) parts.push(headers.map((h) => CSV_ESCAPE(String(r[h] ?? ''))).join(','));
+      parts.push('');
+    }
+    const body = parts.join('\n');
+    res.writeHead(200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="vaia-export-${Date.now()}.csv"`,
+      'Access-Control-Allow-Origin': '*',
+    });
+    return res.end(body);
+  }
+  const body = JSON.stringify({ exportedAt: Date.now(), tables, data: out });
+  res.writeHead(200, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Disposition': `attachment; filename="vaia-export-${Date.now()}.json"`,
+    'Access-Control-Allow-Origin': '*',
+  });
+  return res.end(body);
+}
+
+const CSV_ESCAPE = (v) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+
+function serveShot(res, file) {
+  if (!/^[0-9a-fA-F-]{36}\.(jpg|jpeg|png)$/.test(file || '')) {
+    return json(res, 404, { ok: false, error: 'not found' });
+  }
+  const path = join(SHOTS, file);
+  if (!path.startsWith(SHOTS) || !existsSync(path)) return json(res, 404, { ok: false, error: 'not found' });
+  const ext = file.endsWith('png') ? 'image/png' : 'image/jpeg';
+  res.writeHead(200, { 'Content-Type': ext, 'Cache-Control': 'max-age=300' });
+  return res.end(readFileSync(path));
 }
 
 const DEMO_PAGE = `<!DOCTYPE html><html><head><title>VAIA Demo Page</title>
@@ -254,7 +309,12 @@ const server = createServer(async (req, res) => {
   const url = req.url.split('?')[0];
   if (req.method === 'OPTIONS') return json(res, 204, {});
   if (req.method === 'GET' && url === '/health') return json(res, 200, { ok: true });
-  if (req.method === 'GET' && url === '/') return json(res, 200, { name: 'vaia-receiver', endpoints: ['/api/events', '/api/screenshots', '/api/insights', '/api/sessions', '/api/stats', '/demo'] });
+  if (req.method === 'GET' && url === '/') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(DASHBOARD_HTML);
+  }
+  if (req.method === 'GET' && url === '/api/export') return serveExport(res, qparams(req.url));
+  if (req.method === 'GET' && url.startsWith('/shots/')) return serveShot(res, req.url.split('/').pop());
   if (req.method === 'GET' && url === '/demo') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(DEMO_PAGE);

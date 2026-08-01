@@ -8,6 +8,7 @@
  */
 import { uuid, now } from '../shared/utils.js';
 import * as idb from './idb.js';
+import { analyze } from './vision.js';
 
 const RING = 1200;
 
@@ -44,6 +45,7 @@ export class InsightsEngine {
       this.detectRapidNavigation(ev, cfg);
       this.detectAbandonment(ev, cfg);
       this.detectSessionWarning(ev, cfg);
+      this.detectScrollSpike(ev, cfg);
     } catch (e) {
       /* detectors must never break ingestion */
     }
@@ -140,6 +142,26 @@ export class InsightsEngine {
     );
   }
 
+  detectScrollSpike(ev, cfg) {
+    if (ev.type !== 'scroll') return;
+    const windowMs = cfg.scrollSpikeWindowMs || 3000;
+    const threshold = cfg.scrollSpikeThreshold || 8;
+    const cutoff = ev.ts - windowMs;
+    const big = this.recent.filter(
+      (e) => e.type === 'scroll' && e.ts >= cutoff && Math.abs((e.data && e.data.dy) || 0) > 200
+    );
+    if (big.length >= threshold && !this.detectorsFired.has(`scrollSpike-${Math.floor(ev.ts / windowMs)}`)) {
+      this.detectorsFired.add(`scrollSpike-${Math.floor(ev.ts / windowMs)}`);
+      this.record(
+        'scroll_spike',
+        'Rapid scrolling',
+        `User scrolled ${big.length} times within ${Math.round(windowMs / 1000)}s on ${ev.url} — likely skimming or hunting for content.`,
+        'hesitation',
+        Math.min(1, big.length / (threshold * 2))
+      );
+    }
+  }
+
   /* ---- scoring --------------------------------------------------------- */
 
   frustrationScore() {
@@ -203,7 +225,6 @@ export class InsightsEngine {
       },
     };
     try {
-      const { analyze } = await import('./vision.js');
       const prompt = [
         `Write a concise end-of-session summary for a browsing session.`,
         `Duration: ${Math.round((rec.data.durationMs) / 1000)}s, pages: ${pages.length}.`,
