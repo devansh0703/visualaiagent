@@ -61,6 +61,16 @@ Open the popup, set your **database endpoint** and **vision provider keys** in
 Options, and load any page — the dashboard (`VAIA Dashboard` button) shows the
 live feed, sessions, frame replay, insights, and heatmaps.
 
+## Keyboard shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| `Alt+Shift+P` | Pause / resume monitoring |
+| `Alt+Shift+C` | Capture and analyze the current screen |
+| `Alt+Shift+D` | Open the VAIA dashboard |
+
+(Rebindable in `chrome://extensions/shortcuts`.)
+
 ## Configuration
 
 See `shared/config.js` for defaults. Key sections (editable in Options):

@@ -30,6 +30,20 @@
     }
   },
   "options_page": "ui/options/options.html",
+  "commands": {
+    "toggle-pause": {
+      "suggested_key": { "default": "Alt+Shift+P" },
+      "description": "Pause or resume monitoring"
+    },
+    "capture-now": {
+      "suggested_key": { "default": "Alt+Shift+C" },
+      "description": "Capture and analyze the current screen"
+    },
+    "open-dashboard": {
+      "suggested_key": { "default": "Alt+Shift+D" },
+      "description": "Open the VAIA dashboard"
+    }
+  },
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*", "file://*/*"],

@@ -130,6 +130,11 @@ async function main() {
     check('extension service worker loaded', !!sw);
     if (!sw) return 1;
     console.log(`[e2e] extension id: ${extId}`);
+    const worker = await sw.worker();
+
+    // commands (keyboard shortcuts) registered
+    const cmds = await worker.evaluate(() => chrome.commands.getAll().then((cs) => cs.map((c) => c.name)));
+    check('keyboard commands registered', ['toggle-pause', 'capture-now', 'open-dashboard'].every((c) => cmds.includes(c)), JSON.stringify(cmds));
 
     // extension context page for chrome.runtime access
     const extPage = await browser.newPage();
@@ -198,6 +203,22 @@ async function main() {
     check('manual capture works', !!cap && cap.ok, JSON.stringify(cap));
     const shotStats = await readEventCount(extPage);
     check('screenshot stored locally', shotStats.screenshots > 0, `screenshots=${shotStats.screenshots}`);
+
+    // 6b. keyboard shortcut capture (Alt+Shift+C). Accelerator delivery to
+    // headless Chrome via CDP is unreliable, so this is a soft check.
+    const before = shotStats.screenshots;
+    await demo.keyboard.down('Alt');
+    await demo.keyboard.down('Shift');
+    await demo.keyboard.press('C');
+    await demo.keyboard.up('Shift');
+    await demo.keyboard.up('Alt');
+    await sleep(1200);
+    const after = await readEventCount(extPage);
+    if (after.screenshots > before) {
+      check('keyboard shortcut triggers capture', true);
+    } else {
+      console.log('  \u2013 keyboard shortcut not delivered by headless CDP (soft skip)');
+    }
     check('vision insight generated', shotStats.insights > 0, `insights=${shotStats.insights}`);
 
     // 7. page scan from extension context

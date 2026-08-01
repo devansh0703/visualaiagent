@@ -63,6 +63,16 @@ async function saveConfig(partial) {
   return config;
 }
 
+async function setMode(next) {
+  mode = next === MODES.PAUSED ? MODES.PAUSED : MODES.MONITOR;
+  await storage.setMode(mode);
+  config.enabled = mode !== MODES.PAUSED;
+  await storage.storageSet({ [storage.K.CONFIG]: config });
+  applyConfigEffects();
+  refreshState();
+  return mode;
+}
+
 async function broadcastConfig() {
   const tabs = await chrome.tabs.query({});
   for (const t of tabs) {
@@ -355,8 +365,23 @@ chrome.alarms.onAlarm.addListener(async (a) => {
   }
 });
 
-async function retentionCleanup() {
-  const days = config.privacy && config.privacy.dataRetentionDays ? config.privacy.dataRetentionDays : 30;
+chrome.commands.onCommand.addListener(async (command) => {
+  try {
+    if (command === 'toggle-pause') {
+      await setMode(mode === MODES.PAUSED ? MODES.MONITOR : MODES.PAUSED);
+    } else if (command === 'capture-now') {
+      const active = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tab = active && active[0];
+      await capture.captureNow({ tabId: tab && tab.id, reason: 'manual', session, config: getConfig(), onAnalyze: onAnalyzeScreenshot });
+    } else if (command === 'open-dashboard') {
+      await chrome.tabs.create({ url: chrome.runtime.getURL('ui/dashboard/dashboard.html') });
+    }
+  } catch (e) {
+    captureLog('error', 'command failed: ' + e.message);
+  }
+});
+
+async function retentionCleanup() {  const days = config.privacy && config.privacy.dataRetentionDays ? config.privacy.dataRetentionDays : 30;
   const cutoff = now() - days * 24 * 60 * 60 * 1000;
   const del = { events: 0, screenshots: 0, insights: 0, sessions: 0 };
   for (const store of ['events', 'screenshots', 'insights', 'sessions']) {
@@ -402,12 +427,8 @@ async function handleMessage(msg, sender, sendResponse) {
       return;
     }
     case MSG.SET_MODE: {
-      mode = msg.mode === MODES.PAUSED ? MODES.PAUSED : MODES.MONITOR;
-      await storage.setMode(mode);
-      config.enabled = mode !== MODES.PAUSED;
-      await storage.storageSet({ [storage.K.CONFIG]: config });
-      applyConfigEffects();
-      sendResponse({ ok: true, mode });
+      const next = await setMode(msg.mode === MODES.PAUSED ? MODES.PAUSED : MODES.MONITOR);
+      sendResponse({ ok: true, mode: next });
       return;
     }
     case MSG.GET_CONFIG: {
