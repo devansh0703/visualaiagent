@@ -107,6 +107,14 @@ export const DEFAULTS = {
     enabled: true,
     hourOfDay: 20,
     windowHours: 24,
+    period: 'daily',
+  },
+
+  goals: {
+    enabled: false,
+    distractionsMinutes: 60,
+    checkIntervalMinutes: 30,
+    notify: true,
   },
 
   recorder: {

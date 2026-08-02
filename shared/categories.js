@@ -19,7 +19,7 @@ export function categoryOf(rawUrl) {
   }
   if (host.startsWith('www.')) host = host.slice(4);
   for (const rule of HOST_RULES) {
-    if (rule.hosts.some((h) => host === h || (h.endsWith('.') && host.startsWith(h)))) {
+    if (rule.hosts.some((h) => host === h || (h.endsWith('.') && host.startsWith(h)) || host.endsWith('.' + h))) {
       return { host, score: rule.score, label: rule.host };
     }
   }

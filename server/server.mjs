@@ -18,6 +18,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { attentionByHost, topHosts } from '../shared/attention.js';
+import { categoryOf, focusScoreOf } from '../shared/categories.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = join(ROOT, 'data');
@@ -199,15 +201,18 @@ function qparams(url) {
   return out;
 }
 
+const TIME_COL = { events: 'ts', screenshots: 'ts', insights: 'ts', sessions: 'started_at' };
+
 function serveGet(res, table, opts) {
   const q = opts;
   const limit = Math.min(5000, parseInt(q.limit || '200', 10));
+  const timeCol = TIME_COL[table] || 'ts';
   const where = [];
   const params = [];
   if (q.session) { where.push('session_id = ?'); params.push(q.session); }
   if (q.type) { where.push('type = ?'); params.push(q.type); }
-  if (q.after) { where.push('ts >= ?'); params.push(parseInt(q.after, 10)); }
-  const sql = `SELECT * FROM ${table} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ts DESC LIMIT ?`;
+  if (q.after) { where.push(`${timeCol} >= ?`); params.push(parseInt(q.after, 10)); }
+  const sql = `SELECT * FROM ${table} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${timeCol} DESC LIMIT ?`;
   const rows = db.prepare(sql).all(...params, limit);
   const strip = (r) => {
     const out = { ...r };
@@ -216,6 +221,69 @@ function serveGet(res, table, opts) {
     return out;
   };
   json(res, 200, { ok: true, table, rows: rows.map(strip) });
+}
+
+function loadEventsSince(cutoff, limit) {
+  return db
+    .prepare('SELECT ts, type, url, title, payload FROM events WHERE ts >= ? ORDER BY ts ASC LIMIT ?')
+    .all(cutoff, limit)
+    .map((r) => {
+      let data = {};
+      try {
+        data = JSON.parse(r.payload || '{}').data || {};
+      } catch {}
+      return { ts: r.ts, type: r.type, url: r.url || '', title: r.title || '', data };
+    });
+}
+
+function categoryMs(byHost) {
+  const out = { work: 0, neutral: 0, distraction: 0, unknown: 0 };
+  for (const [host, ms] of Object.entries(byHost)) {
+    const cat = categoryOf('https://' + host);
+    out[cat.label] = (out[cat.label] || 0) + ms;
+  }
+  return out;
+}
+
+function serveAttention(res, opts) {
+  const hours = Math.min(72, Math.max(1, parseInt(opts.hours || '24', 10) || 24));
+  const cutoff = Date.now() - hours * 60 * 60 * 1000;
+  const events = loadEventsSince(cutoff, 400000);
+  const { byHost, totalMs } = attentionByHost(events, { nowMs: Date.now() });
+  json(res, 200, {
+    ok: true,
+    hours,
+    windowMs: hours * 60 * 60 * 1000,
+    totalMs,
+    byHost,
+    top: topHosts(byHost, 12),
+    byCategory: categoryMs(byHost),
+  });
+}
+
+function serveFocus(res, opts) {
+  const days = Math.min(30, Math.max(1, parseInt(opts.days || '7', 10) || 7));
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  const rows = db
+    .prepare('SELECT ts, url, title FROM events WHERE type = ? AND ts >= ? ORDER BY ts ASC LIMIT 500000')
+    .all('page_view', cutoff);
+  const buckets = new Map();
+  for (const r of rows) {
+    const d = new Date(r.ts);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const cur = buckets.get(key) || [];
+    cur.push({ url: r.url, title: r.title || '', ts: r.ts });
+    buckets.set(key, cur);
+  }
+  const out = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const pages = buckets.get(key) || [];
+    const focus = focusScoreOf(pages);
+    out.push({ day: key, focus: focus ? focus.score : null, pages: pages.length });
+  }
+  json(res, 200, { ok: true, days, data: out });
 }
 
 function serveStats(res) {
@@ -320,6 +388,8 @@ const server = createServer(async (req, res) => {
     return res.end(DEMO_PAGE);
   }
   if (req.method === 'GET' && url === '/api/stats') return serveStats(res);
+  if (req.method === 'GET' && url === '/api/attention') return serveAttention(res, qparams(req.url));
+  if (req.method === 'GET' && url === '/api/focus') return serveFocus(res, qparams(req.url));
   if (req.method === 'GET' && url === '/api/events') return serveGet(res, 'events', qparams(req.url));
   if (req.method === 'GET' && url === '/api/screenshots') return serveGet(res, 'screenshots', qparams(req.url));
   if (req.method === 'GET' && url === '/api/insights') return serveGet(res, 'insights', qparams(req.url));

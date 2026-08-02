@@ -17,6 +17,14 @@ test('categoryOf strips subdomains and www', () => {
   assert.equal(categoryOf('https://mail.google.com').label, 'neutral');
 });
 
+test('categoryOf matches deep subdomains of known hosts', () => {
+  assert.equal(categoryOf('https://m.youtube.com/watch?v=x').label, 'distraction');
+  assert.equal(categoryOf('https://mobile.twitter.com/u').label, 'distraction');
+  assert.equal(categoryOf('https://www.bbc.com/news').label, 'neutral');
+  assert.equal(categoryOf('https://api.github.com/repos').label, 'work');
+  assert.equal(categoryOf('https://help.linear.app/x').label, 'work');
+});
+
 test('focusScoreOf computes 0..1 and buckets', () => {
   const pages = [
     { url: 'https://github.com/x' },
