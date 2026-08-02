@@ -22,6 +22,17 @@ export function mkEl(tag, opts = {}) {
   node.hasAttribute = (k) => attrs.has(k);
   node.setAttribute = (k, v) => attrs.set(k, v);
   node.getBoundingClientRect = () => node._rect;
+  node.click = () => {
+    node._clicked = true;
+  };
+  node.focus = () => {};
+  node.scrollIntoView = () => {
+    node._scrolledIntoView = true;
+  };
+  node.dispatchEvent = (e) => {
+    node._events = node._events || [];
+    node._events.push(e);
+  };
   Object.defineProperty(node, 'parentNode', { get: () => node._parent });
   Object.defineProperty(node, 'parentElement', { get: () => (node._parent && node._parent.nodeType === 1 ? node._parent : null) });
   Object.defineProperty(node, 'previousElementSibling', { get: () => node._prevSib || null });
@@ -41,8 +52,29 @@ function makeClassList(classes) {
   return arr;
 }
 
-export function makeDocument(htmlEl) {
-  return { documentElement: htmlEl, elementFromPoint: () => null };
+export function makeDocument(htmlEl, opts = {}) {
+  const doc = { documentElement: htmlEl, elementFromPoint: () => null };
+  doc.querySelectorAll = opts.querySelectorAll || ((sel) => (String(sel).includes(',') ? [htmlEl] : []));
+  doc.querySelector = opts.querySelector || (() => null);
+  doc.body = opts.body || { innerText: '', textContent: '', scrollHeight: 0 };
+  return doc;
+}
+
+/**
+ * Build a document whose querySelectorAll routes known selectors to labelled
+ * element arrays — enough for the agentAbility router unit tests.
+ */
+export function makeRoutedDoc(htmlEl, routes, bodyText = '') {
+  const doc = makeDocument(htmlEl, {
+    body: { innerText: bodyText, textContent: bodyText, scrollHeight: 1000 },
+  });
+  doc.querySelectorAll = (sel) => {
+    for (const [pattern, els] of Object.entries(routes || {})) {
+      if (String(sel).replace(/\s+/g, ' ').includes(pattern)) return els;
+    }
+    return [];
+  };
+  return doc;
 }
 
 export function sandboxWith(shims) {

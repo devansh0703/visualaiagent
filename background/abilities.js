@@ -355,13 +355,14 @@ def({
     }
     const res = await ctx.dom('fill_form', { formIndex, data });
     if (!res.ok) return res;
+    const fieldCount = form.fieldCount != null ? form.fieldCount : (form.fields ? form.fields.length : 0);
     return {
       ok: true,
-      form: { index: form.index, action: form.action, method: form.method, fieldCount: form.fieldCount },
+      form: { index: form.index, action: form.action, method: form.method, fieldCount },
       generated,
       filled: res.applied || [],
       unmatched: res.unmatched || [],
-      filledCount: res.filledCount || res.applied.length || 0,
+      filledCount: res.filledCount || (res.applied ? res.applied.length : 0) || 0,
     };
   },
 });
@@ -378,8 +379,9 @@ def({
     const msg = String(a.message || '').trim();
     if (!msg) return { ok: false, error: 'chat needs a message' };
     const sessionId = (ctx.session && ctx.session.id) || 'anon';
+    appendChat(sessionId, 'user', msg);
     const history = getChat(sessionId);
-    const reply = await chat({ messages: [...history, { role: 'user', content: msg }], tabId: ctx.tabId, config: ctx.config, session: ctx.session });
+    const reply = await chat({ messages: history, tabId: ctx.tabId, config: ctx.config, session: ctx.session });
     if (reply.ok) appendChat(sessionId, 'assistant', reply.reply);
     else appendChat(sessionId, 'assistant', 'Sorry, I could not respond: ' + reply.error);
     return reply;

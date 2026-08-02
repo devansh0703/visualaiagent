@@ -34,6 +34,31 @@
     <div id="askAnswer" class="muted" style="margin-top:6px;font-size:12px;white-space:pre-wrap;display:none"></div>
   </div>
 
+  <div class="card" id="chatCard">
+    <h3>Chatbot <span class="tag mono">sees this tab</span></h3>
+    <div class="chat-log" id="chatLog"></div>
+    <div class="row" style="gap:6px;margin-top:8px">
+      <input type="text" id="chatInput" placeholder="Ask anything… e.g. fill the form with test data" />
+      <button id="btnChat" class="primary" style="white-space:nowrap">Send</button>
+    </div>
+    <div class="chip-row">
+      <button class="ghost pill-btn chip" data-chip="summarize this page">Summarize</button>
+      <button class="ghost pill-btn chip" data-chip="list the forms on this page">Forms</button>
+      <button class="ghost pill-btn chip" data-chip="list the links on this page">Links</button>
+      <button class="ghost pill-btn chip" data-chip="fill the form with test data">Fill form</button>
+      <button class="ghost pill-btn chip" data-chip="click the first button">Click</button>
+      <button class="ghost pill-btn chip" data-chip="check the accessibility of this page">A11y</button>
+    </div>
+  </div>
+
+  <div class="card" id="abilitiesCard">
+    <div class="row">
+      <h3>Agent abilities <span class="tag mono" id="abilCount">…</span></h3>
+      <button id="btnToggleAbilities" class="ghost pill-btn" style="margin-left:auto">Show</button>
+    </div>
+    <div id="abilitiesBody" class="hidden"></div>
+  </div>
+
   <div class="card" id="taskCard">
     <h3>Task agent (computer use)</h3>
     <div class="row" style="gap:6px">

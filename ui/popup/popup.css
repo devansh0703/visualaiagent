@@ -7,3 +7,19 @@ header { margin-bottom: 10px; }
 }
 .scan-modal.hidden { display: none; }
 .scan-box { width: 90%; max-height: 80%; overflow: auto; }
+
+/* chatbot */
+.chat-log { display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow: auto; margin-top: 8px; }
+.chat-bubble { max-width: 88%; padding: 8px 10px; border-radius: 10px; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.chat-bubble.user { align-self: flex-end; background: var(--good, #1f6f4a); color: #fff; border-bottom-right-radius: 2px; }
+.chat-bubble.bot { align-self: flex-start; background: #1d2834; color: #dfe7ee; border-bottom-left-radius: 2px; }
+.chat-meta { font-size: 10px; opacity: .6; margin-top: 4px; font-family: var(--mono, monospace); }
+.chip-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+
+/* abilities browser */
+.abil-card { border: 1px solid #2b3a4a; border-radius: 8px; padding: 8px; margin-top: 8px; }
+.abil-card h4 { margin: 0 0 3px; font-size: 12px; }
+.abil-card p { margin: 0 0 6px; font-size: 11px; color: var(--muted, #8aa0b5); }
+.abil-args { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.abil-args input { font-size: 11px; }
+.abil-cat { font: 700 10px/1 var(--mono, monospace); letter-spacing: .08em; color: var(--accent, #6ec3ff); text-transform: uppercase; margin-top: 10px; }

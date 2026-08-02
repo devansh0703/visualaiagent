@@ -279,6 +279,47 @@ async function main() {
       JSON.stringify(aIns && aIns.insights && aIns.insights.filter((r) => r.kind === 'agent').map((r) => r.type))
     );
 
+    // 11e. abilities registry responds with 30 skills
+    console.log('[e2e] abilities + chatbot + form filling…');
+    const alist = await extCall(extPage, { type: 'vaia:list_abilities' });
+    check(
+      '30 abilities listed across 4 categories',
+      !!alist && alist.ok && alist.count === 30 && ['read', 'write', 'agent', 'meta'].every((c) => alist.abilities.some((a) => a.category === c)),
+      JSON.stringify(alist && { count: alist.count, cats: alist.abilities && [...new Set(alist.abilities.map((a) => a.category))] })
+    );
+
+    // 11f. read ability: inspect forms on the demo page
+    const fread = await extCall(extPage, { type: 'vaia:run_ability', ability: 'page_forms' });
+    check(
+      'page_forms finds the demo form',
+      !!fread && fread.ok && Array.isArray(fread.forms) && fread.forms.length >= 1 && fread.forms[0].fields.some((x) => x.name === 'q'),
+      JSON.stringify(fread && (fread.error || fread.forms && fread.forms.map((f) => f.fields.map((x) => x.name))))
+    );
+
+    // 11g. fill_form fills the search input and submits
+    const ff = await extCall(extPage, { type: 'vaia:run_ability', ability: 'fill_form', args: { data: { q: 'neobrutalism' } } });
+    check(
+      'fill_form filled the demo form',
+      !!ff && ff.ok && ff.filledCount >= 1 && (ff.filled || []).some((x) => x.key === 'q'),
+      JSON.stringify(ff && (ff.error || { filled: ff.filled, filledCount: ff.filledCount }))
+    );
+
+    // 11h. chatbot responds (mock) about the page
+    const ch = await extCall(extPage, { type: 'vaia:chat', message: 'summarize this page' });
+    check(
+      'chatbot returns a reply',
+      !!ch && ch.ok && typeof ch.reply === 'string' && ch.reply.length > 20,
+      JSON.stringify(ch && (ch.error || (ch.reply || '').slice(0, 60)))
+    );
+
+    // 11i. chat turn insight persisted
+    const cIns = await extCall(extPage, { type: 'vaia:get_insights', limit: 30 });
+    check(
+      'chat turn persisted as an agent insight',
+      !!cIns && Array.isArray(cIns.insights) && cIns.insights.some((r) => r.kind === 'agent' && r.type === 'chat_turn'),
+      JSON.stringify(cIns && cIns.insights && cIns.insights.filter((r) => r.kind === 'agent').map((r) => r.type))
+    );
+
     // 12. model discovery endpoint responds
     const models = await extCall(extPage, { type: 'vaia:get_models' });
     check('get_models endpoint responds', !!models && models.ok, JSON.stringify(models && models.error));

@@ -131,6 +131,10 @@ td.wrap{white-space:normal;max-width:360px;overflow:hidden;text-overflow:ellipsi
 .agent .sec{font:900 10px/1 var(--mono);letter-spacing:.1em;margin:10px 0 5px;background:var(--ink);color:#fff;display:inline-block;padding:4px 7px}
 .agent ul{margin:0;padding-left:18px;font-size:12px;line-height:1.5}
 .agent .kv{font:700 11px/1.6 var(--mono)}
+.agent .chat-msg{margin:4px 0;padding:6px 8px;border:2px solid var(--ink);font-size:12px;line-height:1.5;word-break:break-word}
+.agent .chat-msg.user{background:var(--cyan);margin-left:12%}
+.agent .chat-msg.bot{background:var(--cream);margin-right:12%}
+.agent .chat-msg b{font:900 10px/1 var(--mono);letter-spacing:.05em}
 .agent .sev-high{background:var(--red);color:#fff}
 .agent .sev-medium{background:var(--orange)}
 .agent .sev-low{background:var(--lime)}
@@ -398,6 +402,34 @@ async function renderInsights() {
 
 function agentCard(d, when) {
   const t = d.type;
+  if (t === 'chat_turn') {
+    const q = esc(d.message || '');
+    const reply = esc(d.reply || '');
+    return `<div class="agent task">
+      <h3>Chat</h3>
+      <div class="chat-msg user"><b>you:</b> ${q}</div>
+      <div class="chat-msg bot"><b>agent:</b><br>${reply.replace(/\n/g, '<br>')}</div>
+      <div class="meta">${ts(when)} \u00b7 ${esc(d.provider || 'mock')} ${esc(d.model || '')}</div>
+    </div>`;
+  }
+  if (t === 'agent_ability') {
+    const r = d.result || {};
+    const filled = (r.filled || []).map((f) => `<li>${esc(f.ref || f.key || '')} ${esc(f.key || '')} = <span class="mono">${esc(f.value || '')}</span></li>`).join('');
+    const unmatched = (r.unmatched || []).map((u) => `<li>${esc(u)}</li>`).join('');
+    const issues = (r.issues || []).map((i) => `<li><span class="sev-${esc(i.severity || 'low')}" style="padding:1px 5px;border:2px solid var(--ink);font:700 9px/1 var(--mono)">${esc(i.severity || 'low')}</span> ${esc(i.title || '')}${i.form != null ? ' (form ' + i.form + ')' : ''}</li>`).join('');
+    const plan = (r.plan || []).map((p, i) => `<li>${esc(p)}</li>`).join('');
+    const steps = (r.steps || []).map((s) => `<div class="step"><b>step ${s.step}</b>${esc((s.action && s.action.type) || '?')}${(s.action && s.action.ref) ? ' \u2192 ' + esc(s.action.ref) : ''}</div>`).join('');
+    return `<div class="agent">
+      <h3>${esc(d.title || 'Ability')}</h3>
+      <p>${esc(d.body || '')}</p>
+      ${filled ? `<div class="sec">Filled fields</div><ul>${filled}</ul>` : ''}
+      ${unmatched ? `<div class="sec">Unmatched</div><ul>${unmatched}</ul>` : ''}
+      ${issues ? `<div class="sec">Issues</div><ul>${issues}</ul>` : ''}
+      ${plan ? `<div class="sec">Plan</div><ul>${plan}</ul>` : ''}
+      ${steps ? `<div class="sec">Steps</div><div class="steps">${steps}</div>` : ''}
+      <div class="meta">${ts(when)} \u00b7 ${esc(d.ok ? 'ok' : 'failed')} \u00b7 ${esc(d.ability || '')} \u00b7 ${esc(d.category || '')}</div>
+    </div>`;
+  }
   if (t === 'task_run') {
     const steps = (d.data.steps || []).map((s)=>{
       const a = s.action || {};
@@ -436,7 +468,7 @@ async function renderAgent() {
   const res = await get('/api/insights?limit=120');
   const rows = (res.rows || []).filter((r)=> r.data && r.data.kind === 'agent');
   $('agentBody').innerHTML = rows.map((r)=>agentCard(r.data, r.ts)).join('')
-    || '<div class="empty">no agent runs yet — use the Task agent or Analyze page in the popup</div>';
+    || '<div class="empty">no agent runs yet — chat with the agent, run an ability, or Analyze page in the popup</div>';
 }
 
 async function renderSessions() {

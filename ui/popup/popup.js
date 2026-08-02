@@ -345,6 +345,129 @@ async function runDigest(period) {
   refresh();
 }
 
+// ---- chatbot ---------------------------------------------------------------
+function addChatBubble(role, text, meta) {
+  const log = $('chatLog');
+  const b = el('div', { class: 'chat-bubble ' + (role === 'user' ? 'user' : 'bot'), text });
+  if (meta) b.appendChild(el('div', { class: 'chat-meta', text: meta }));
+  log.appendChild(b);
+  log.scrollTop = log.scrollHeight;
+  return b;
+}
+
+async function sendChat(message) {
+  const text = String(message || '').trim();
+  if (!text) return;
+  addChatBubble('user', text);
+  $('chatInput').value = '';
+  const btn = $('btnChat');
+  btn.disabled = true;
+  const bubble = addChatBubble('bot', '…');
+  try {
+    const res = await send({ type: MSG.CHAT, message: text });
+    bubble.textContent = res.reply || res.error || 'no response';
+    if (res.model) bubble.appendChild(el('div', { class: 'chat-meta', text: `${res.provider || ''} · ${res.model || ''}` }));
+  } catch (e) {
+    bubble.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    refresh();
+  }
+}
+
+// ---- abilities browser -------------------------------------------------------
+async function loadAbilities() {
+  const res = await send({ type: MSG.LIST_ABILITIES });
+  const list = res.abilities || [];
+  $('abilCount').textContent = list.length ? `${list.length} skills` : '…';
+  const body = $('abilitiesBody');
+  body.innerHTML = '';
+  for (const cat of ['read', 'write', 'agent', 'meta']) {
+    const items = list.filter((a) => a.category === cat);
+    if (!items.length) continue;
+    body.appendChild(el('div', { class: 'abil-cat', text: `${cat} — ${items.length}` }));
+    for (const a of items) body.appendChild(abilityCard(a));
+  }
+}
+
+function abilityCard(a) {
+  const card = el('div', { class: 'abil-card' });
+  const head = el('div', { class: 'row' });
+  head.appendChild(el('h4', { text: a.name }));
+  const runBtn = el('button', { class: 'primary pill-btn', style: 'margin-left:auto;font-size:10px;padding:2px 8px', text: 'Run' });
+  head.appendChild(runBtn);
+  card.appendChild(head);
+  card.appendChild(el('p', { text: a.description }));
+  const argsBox = el('div', { class: 'abil-args' });
+  const inputs = [];
+  for (const arg of a.args || []) {
+    if (arg.type === 'object') continue;
+    const inp = el('input', { class: 'grow mono', type: 'text', placeholder: (arg.required ? '*' : '') + (arg.name || '') + ' — ' + (arg.desc || '') });
+    inputs.push({ inp, arg });
+    const row = el('label', { class: 'row', style: 'gap:6px;font-size:11px;align-items:center' }, [
+      el('span', { style: 'min-width:64px', text: arg.name }),
+      inp,
+    ]);
+    argsBox.appendChild(row);
+  }
+  card.appendChild(argsBox);
+  const out = el('div', { class: 'muted', style: 'font-size:11px;white-space:pre-wrap;display:none' });
+  card.appendChild(out);
+  runBtn.addEventListener('click', () => runAbilityAction(a, inputs, out, runBtn));
+  return card;
+}
+
+async function runAbilityAction(a, inputs, out, btn) {
+  const args = {};
+  for (const { inp, arg } of inputs) {
+    const v = inp.value.trim();
+    if (v === '') continue;
+    if (arg.type === 'number') args[arg.name] = Number(v);
+    else if (arg.type === 'boolean') args[arg.name] = v === 'true' || v === '1' || v === 'yes';
+    else args[arg.name] = v;
+  }
+  const missing = (a.args || []).filter((ar) => ar.required && (args[ar.name] == null || args[ar.name] === ''));
+  out.style.display = 'block';
+  if (missing.length) {
+    out.textContent = 'Missing required argument(s): ' + missing.map((m) => m.name).join(', ');
+    return;
+  }
+  btn.disabled = true;
+  out.textContent = 'Running…';
+  try {
+    const res = await send({ type: MSG.RUN_ABILITY, ability: a.id, args });
+    out.textContent = formatAbilityResult(res);
+    toast(`ability "${a.id}" ${res.ok ? 'ok' : 'failed'}`);
+  } catch (e) {
+    out.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    refresh();
+  }
+}
+
+function formatAbilityResult(res) {
+  if (!res.ok) return '✗ ' + (res.error || 'failed');
+  const lines = [];
+  if (res.summary) lines.push(res.summary);
+  if (res.description) lines.push(res.description);
+  if (Array.isArray(res.filled) && res.filled.length) {
+    lines.push(`Filled ${res.filledCount} field(s)` + (res.generated ? ' (auto-generated test data)' : ''));
+    for (const f of res.filled) lines.push(`  ${f.ref} ${f.key} = ${f.value}`);
+    if (res.unmatched && res.unmatched.length) lines.push('unmatched: ' + res.unmatched.join(', '));
+  }
+  if (Array.isArray(res.plan) && res.plan.length) lines.push(res.plan.join('\n'));
+  if (Array.isArray(res.issues) && res.issues.length) lines.push(res.issues.slice(0, 8).map((i) => `[${i.severity}] ${i.title}`).join('\n'));
+  if (Array.isArray(res.steps) && res.steps.length) {
+    lines.push(res.steps.map((s) => `step ${s.step}: ${(s.action && s.action.type) || '?'} ${(s.action && s.action.ref) || ''}`).join('\n') + (res.result ? '\n→ ' + res.result : ''));
+  }
+  if (res.reply) lines.push(res.reply);
+  if (res.abilities) lines.push(`${res.count} abilities available`);
+  if (res.count != null && !res.abilities && !lines.length) lines.push(`${res.count} result(s)`);
+  if (res.model) lines.push('\n(' + (res.provider || '') + ' · ' + res.model + ')');
+  return lines.join('\n') || 'done';
+}
+
 function askPreset(key) {
   const prompt = PRESETS[key];
   if (!prompt) return;
@@ -388,6 +511,19 @@ function wire() {
   $('btnTask').addEventListener('click', () => runTask($('taskInput').value));
   $('taskInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') runTask($('taskInput').value);
+  });
+  $('btnChat').addEventListener('click', () => sendChat($('chatInput').value));
+  $('chatInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') sendChat($('chatInput').value);
+  });
+  document.querySelectorAll('.chip[data-chip]').forEach((c) =>
+    c.addEventListener('click', () => sendChat(c.getAttribute('data-chip')))
+  );
+  $('btnToggleAbilities').addEventListener('click', () => {
+    const body = $('abilitiesBody');
+    const show = body.classList.toggle('hidden');
+    $('btnToggleAbilities').textContent = show ? 'Show' : 'Hide';
+    if (!show && !body.childElementCount) loadAbilities();
   });
   $('btnTaskPreset1').addEventListener('click', () => runTask('click the first button'));
   $('btnTaskPreset2').addEventListener('click', () => runTask('type "hello" into the first input field'));
