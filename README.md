@@ -51,6 +51,25 @@ computer use / browser-use) — fully offline via the `mock` provider:
 - Privacy: actions are executed on the real page, but keystrokes typed by the
   agent still go through the same masking/redaction rules as the user's
 
+### Agent abilities (30 skills) + chatbot
+The agent exposes **30 well-defined abilities** — each one a named skill you can
+invoke from the popup's **Agent abilities** browser or trigger from the
+**Chatbot** in plain English. Grouped by category:
+
+| Category | Skills |
+| --- | --- |
+| **read** (page intelligence) | DOM snapshot, read page text, list links, extract tables, inspect forms, page outline, find contacts & data, page metadata, accessibility audit, page health check, find element, summarize page |
+| **write** (computer use) | click element, type text, clear field, select dropdown option, check/uncheck checkbox, scroll page, navigate to URL, submit form, **fill form** (auto-generates test data or uses your values; never touches sensitive fields) |
+| **agent** (composed) | **chat** (multi-turn chatbot that sees the tab), describe screen, run a task, plan a task, deep page report, audit forms |
+| **meta** | take screenshot, viewport info, list abilities |
+
+The **chatbot** remembers the conversation per session, sees a live DOM snapshot
+of the current tab (plus a screenshot when a vision key is set), and can point
+you at the right ability — e.g. *"fill the form with test data"* → `fill_form`.
+Every chat turn and ability run is persisted as an insight (`chat_turn`,
+`agent_ability`) and rendered in the dashboard **Agent** tab.
+Everything works fully offline via the `mock` provider.
+
 ### Local-first database sync
 - Every event is stored in IndexedDB first — the DB is an offline outbound
   queue, so nothing is lost when offline
@@ -81,8 +100,10 @@ live feed, sessions, frame replay, insights, and heatmaps.
 To try the agent features offline, open the popup's **Task** card: press
 **Analyze page** for a page report, or type a task (e.g. *"Click the first
 button"*) and hit Run — with the default `mock` vision provider everything
-works with no API key. The dashboard's **Agent** tab shows every report and
-task transcript.
+works with no API key. The **Chatbot** card answers questions about the tab and
+translates natural language into abilities; the **Agent abilities** card lists
+all 30 skills with their arguments and a Run button. The dashboard's
+**Agent** tab shows every report, task transcript, chat turn and ability run.
 
 Screenshots of the dashboard and agent runs live in `demo/`.
 
@@ -145,6 +166,7 @@ content/element-tools.js    DOM attribution, xpath/css fingerprinting, a11y
 content/privacy-scan.js     sensitive-field detection (WeakSet-cached)
 background/service-worker.js orchestrator: routing, sessions, tabs, flushing
 background/agent.js         agentic layer: page reports + computer-use task loop
+background/abilities.js     the 30-skill ability registry + chatbot history
 background/capture.js       capture pipeline (offscreen re-encode)
 background/vision.js        6 vision providers + offline mock
 background/insights.js      heuristic detectors + LLM summaries
@@ -163,12 +185,13 @@ HTTP.
 ## Testing
 
 ```bash
-npm test            # 88 unit tests (config, utils, element-tools, session, insights, vision, db, agent)
+npm test            # 104 unit tests (config, utils, element-tools, session, insights, vision, db, agent, abilities)
 npm run test:integration  # live provider checks — skips without keys
 npm run e2e   # loads the real extension in headless Chrome (puppeteer-core +
               #   system Chrome), drives the /demo page, and verifies tracking,
               #   redaction, capture, vision, agent page-reports + task loop,
-              #   and the full receiver round-trip
+              #   the 30-ability registry, form filling, chatbot, and the full
+              #   receiver round-trip
 ```
 
 The live integration test runs against **Groq** when `GROQ_API_KEY` is set
