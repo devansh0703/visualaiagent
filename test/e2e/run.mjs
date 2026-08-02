@@ -253,6 +253,32 @@ async function main() {
     const ask = await extCall(extPage, { type: 'vaia:ask_agent', question: 'What is on this page?' });
     check('ask agent returns an answer', !!ask.ok && !!ask.answer, JSON.stringify(ask).slice(0, 120));
 
+    // 11b. analyze-page round trip (mock vision + real DOM digest)
+    console.log('[e2e] analyze page…');
+    const ar = await extCall(extPage, { type: 'vaia:analyze_page', withVision: true });
+    check(
+      'analyze page returns a report',
+      !!ar && ar.ok && !!ar.report && !!ar.report.title && !!ar.insightId,
+      JSON.stringify(ar && ar.error)
+    );
+
+    // 11c. run-task round trip (mock computer-use loop clicks via DOM digest)
+    console.log('[e2e] run task (agent loop)…');
+    const rt = await extCall(extPage, { type: 'vaia:run_task', task: 'Click the first button', opts: { maxSteps: 4, withScreenshots: false } });
+    check(
+      'run task produced a click transcript',
+      !!rt && rt.ok && Array.isArray(rt.steps) && rt.steps.length >= 2 && rt.steps.some((s) => s.action && s.action.type === 'click'),
+      JSON.stringify(rt && (rt.error || (rt.steps || []).map((s) => s.action && s.action.type)))
+    );
+
+    // 11d. agent insights were persisted
+    const aIns = await extCall(extPage, { type: 'vaia:get_insights', limit: 25 });
+    check(
+      'agent insights persisted',
+      !!aIns && Array.isArray(aIns.insights) && aIns.insights.some((r) => r.kind === 'agent' && r.type === 'page_report') && aIns.insights.some((r) => r.kind === 'agent' && r.type === 'task_run'),
+      JSON.stringify(aIns && aIns.insights && aIns.insights.filter((r) => r.kind === 'agent').map((r) => r.type))
+    );
+
     // 12. model discovery endpoint responds
     const models = await extCall(extPage, { type: 'vaia:get_models' });
     check('get_models endpoint responds', !!models && models.ok, JSON.stringify(models && models.error));
@@ -261,12 +287,40 @@ async function main() {
     const digest = await extCall(extPage, { type: 'vaia:run_digest' });
     check('daily digest generated', !!digest.ok && !!digest.insightId, JSON.stringify(digest));
 
+    // 13b. weekly digest honors the period
+    const weekly = await extCall(extPage, { type: 'vaia:run_digest', period: 'weekly' });
+    check('weekly digest generated', !!weekly.ok && weekly.type === 'weekly_digest', JSON.stringify(weekly));
+
+    // 13c. stats carry attention (time-per-host) data
+    const statsAtt = await extCall(extPage, { type: 'vaia:get_stats' });
+    check(
+      'stats include attention data',
+      !!statsAtt && !!statsAtt.attention && typeof statsAtt.attention.totalMs === 'number',
+      JSON.stringify(statsAtt && statsAtt.attention && statsAtt.attention.top && statsAtt.attention.top.slice(0, 2))
+    );
+
+    // 13d. goals config persists through save/get_state
+    const gSave = await extCall(extPage, { type: 'vaia:save_config', config: { goals: { enabled: true, distractionsMinutes: 30 } } });
+    const gState = await extCall(extPage, { type: 'vaia:get_state' });
+    check(
+      'goals config persists',
+      !!gSave && gSave.ok && !!gState && gState.config && gState.config.goals && gState.config.goals.enabled === true && gState.config.goals.distractionsMinutes === 30,
+      JSON.stringify(gState && gState.config && gState.config.goals)
+    );
+
     // 14. server dashboard + export
     const dash = await fetch(`http://127.0.0.1:${PORT}/`);
     const dashHtml = await dash.text();
     check('dashboard served at /', dash.ok && dashHtml.includes('VAIA Dashboard'));
+    check('dashboard has neobrutalist chrome', dashHtml.includes('--ink:') && dashHtml.includes('class="ticker"') && dashHtml.includes('data-tab="today"'), 'missing neo-brutalist markers');
     const exp = await (await fetch(`http://127.0.0.1:${PORT}/api/export?format=json`)).json();
     check('export endpoint returns tables', !!exp && Array.isArray(exp.data && exp.data.events), JSON.stringify(exp && Object.keys(exp.data || {})));
+
+    // 14b. dashboard attention + focus endpoints
+    const attSrv = await (await fetch(`http://127.0.0.1:${PORT}/api/attention?hours=24`)).json();
+    check('server attention endpoint responds', attSrv && attSrv.ok && typeof attSrv.totalMs === 'number', JSON.stringify(attSrv && attSrv.top && attSrv.top.slice(0, 2)));
+    const focSrv = await (await fetch(`http://127.0.0.1:${PORT}/api/focus?days=7`)).json();
+    check('server focus endpoint responds', focSrv && focSrv.ok && Array.isArray(focSrv.data) && focSrv.data.length === 7, JSON.stringify(focSrv && focSrv.data && focSrv.data.length));
   } catch (e) {
     failures++;
     console.error('[e2e] FAILED:', e.message);

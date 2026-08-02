@@ -26,7 +26,27 @@
       <input type="text" id="askInput" placeholder="e.g. what should I do next on this page?" />
       <button id="btnAsk" class="primary" style="white-space:nowrap">Ask</button>
     </div>
+    <div class="row" style="gap:6px;margin-top:6px">
+      <button id="btnPreset1" class="ghost pill-btn">Summarize</button>
+      <button id="btnPreset2" class="ghost pill-btn">Improve</button>
+      <button id="btnPreset3" class="ghost pill-btn">Distracted?</button>
+    </div>
     <div id="askAnswer" class="muted" style="margin-top:6px;font-size:12px;white-space:pre-wrap;display:none"></div>
+  </div>
+
+  <div class="card" id="taskCard">
+    <h3>Task agent (computer use)</h3>
+    <div class="row" style="gap:6px">
+      <input type="text" id="taskInput" placeholder="e.g. click the download button, then scroll down" />
+      <button id="btnTask" class="primary" style="white-space:nowrap">Run</button>
+    </div>
+    <div class="row" style="gap:6px;margin-top:6px">
+      <button id="btnTaskPreset1" class="ghost pill-btn">Click first button</button>
+      <button id="btnTaskPreset2" class="ghost pill-btn">Type into field</button>
+      <button id="btnTaskPreset3" class="ghost pill-btn">Scroll down</button>
+      <button id="btnReport" class="ghost pill-btn">Analyze page</button>
+    </div>
+    <div id="taskResult" class="muted" style="margin-top:6px;font-size:12px;white-space:pre-wrap;display:none"></div>
   </div>
 
   <div id="scanModal" class="scan-modal hidden">
@@ -58,6 +78,16 @@
   </div>
 
   <div class="card">
+    <h3>Sites — last 60 min</h3>
+    <div class="col" id="sitesList" style="font-size:12px"></div>
+  </div>
+
+  <div class="card">
+    <h3>Quick controls</h3>
+    <div class="col" id="controls" style="font-size:12px;gap:6px"></div>
+  </div>
+
+  <div class="card">
     <h3>Database sync</h3>
     <div class="row wrap" id="dbStatus">
       <span class="tag mono" id="dbEndpoint">no endpoint</span>
@@ -68,6 +98,7 @@
       <button id="btnFlush" class="ghost pill-btn">Flush now</button>
       <button id="btnExport" class="ghost pill-btn">Export JSON</button>
       <button id="btnDigest" class="ghost pill-btn" title="Generate a daily digest now">Digest</button>
+      <button id="btnDigestWeekly" class="ghost pill-btn" title="Generate a weekly digest now">Week</button>
     </div>
   </div>
 

@@ -329,8 +329,8 @@
     }
   }
 
-  /** Extract a compact list of interactive elements currently in the viewport (for AI). */
-  function visibleInteractiveElements(max = 80) {
+  /** Visible interactive DOM nodes (not descriptors) in document order. */
+  function interactiveNodes(max = 80) {
     if (typeof document === 'undefined') return [];
     if (typeof document.querySelectorAll !== 'function') return [];
     const out = [];
@@ -354,15 +354,23 @@
       if (hidden) continue;
       const size = r.width * r.height;
       if (size < 25) continue;
-      out.push({
+      out.push(el);
+      added++;
+    }
+    return out;
+  }
+
+  /** Extract a compact list of interactive elements currently in the viewport (for AI). */
+  function visibleInteractiveElements(max = 80) {
+    return interactiveNodes(max).map((el) => {
+      const r = el.getBoundingClientRect();
+      return {
         tag: (el.tagName || '').toLowerCase(),
         text: truncate(cleanText(el.textContent), 40) || (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('placeholder'))) || '',
         type: (el.getAttribute && el.getAttribute('type')) || '',
         rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
-      });
-      added++;
-    }
-    return out;
+      };
+    });
   }
 
   /** Compact page summary for vision/scan requests. */
@@ -385,6 +393,565 @@
     };
   }
 
+  /**
+   * Agent-grade DOM snapshot: every visible interactive element gets a stable
+   * `ref` (el1..elN) in document order, plus page text, links and forms. The
+   * same ordering is used by executeAgentAction() so refs round-trip.
+   */
+  function agentDigest(max = 40) {
+    if (typeof document === 'undefined') return { title: '', url: '', elements: [], forms: [], links: { count: 0, top: [] } };
+    let text = '';
+    try {
+      text = document.body && document.body.innerText ? cleanText(document.body.innerText, 3000) : '';
+    } catch {
+      text = '';
+    }
+    const nodes = interactiveNodes(max);
+    const elements = nodes.map((n, i) => {
+      const r = n.getBoundingClientRect();
+      return {
+        ref: 'el' + (i + 1),
+        tag: (n.tagName || '').toLowerCase(),
+        text: truncate(cleanText(n.textContent), 40) || (n.getAttribute && (n.getAttribute('aria-label') || n.getAttribute('placeholder'))) || '',
+        type: (n.getAttribute && n.getAttribute('type')) || '',
+        rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+      };
+    });
+    const links = { count: 0, top: [] };
+    const forms = [];
+    try {
+      const anchors = Array.from(document.querySelectorAll('a[href]'));
+      links.count = anchors.length;
+      links.top = anchors.slice(0, 20).map((a) => ({ text: cleanText(a.textContent, 30), url: (a.getAttribute && a.getAttribute('href')) || '' }));
+      for (const f of Array.from(document.querySelectorAll('form')).slice(0, 10)) {
+        const fields = Array.from(f.querySelectorAll('input,textarea,select')).slice(0, 10).map((inp) => ({
+          type: (inp.getAttribute && inp.getAttribute('type')) || 'text',
+          name: (inp.getAttribute && inp.getAttribute('name')) || '',
+          placeholder: (inp.getAttribute && inp.getAttribute('placeholder')) || '',
+          id: (inp.getAttribute && inp.getAttribute('id')) || '',
+          sensitive: isSensitiveElement(inp),
+        }));
+        forms.push({ action: (f.getAttribute && f.getAttribute('action')) || '', fields, fieldCount: fields.length });
+      }
+    } catch {}
+    return {
+      title: document.title || '',
+      url: (typeof location !== 'undefined' && location.href) || '',
+      text,
+      elements,
+      links,
+      forms,
+      tables: (document.querySelectorAll && document.querySelectorAll('table').length) || 0,
+      viewport: { w: (window && window.innerWidth) || 0, h: (window && window.innerHeight) || 0 },
+      scrollY: (window && window.scrollY) || 0,
+      scrollHeight: (document.documentElement && document.documentElement.scrollHeight) || 0,
+    };
+  }
+
+  /**
+   * Execute a computer-use action against the current page. `ref` is an elN
+   * identifier produced by agentDigest(); refs are resolved against a fresh
+   * interactive-node snapshot (same ordering / same `max`), so the element
+   * must still be visible.
+   */
+  function executeAgentAction(a, max = 40) {
+    if (!a || !a.type) return { ok: false, error: 'no action type' };
+    if (a.type === 'scroll') {
+      const amount = (a.dir === 'up' ? -1 : 1) * Math.abs(a.amount || 400);
+      try {
+        if (typeof window !== 'undefined' && typeof window.scrollBy === 'function') {
+          window.scrollBy({ top: amount, behavior: 'auto' });
+        } else if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+          window.scrollTo(0, (window.scrollY || 0) + amount);
+        }
+      } catch (e) {
+        return { ok: false, error: 'scroll failed: ' + e.message };
+      }
+      return { ok: true, type: 'scroll', amount, scrollY: (window && window.scrollY) || 0 };
+    }
+    if (a.type === 'wait') {
+      return { ok: true, type: 'wait', ms: a.amount || 800 };
+    }
+    if (a.type === 'navigate') {
+      if (a.text) {
+        try {
+          location.href = a.text;
+        } catch {
+          return { ok: false, error: 'could not navigate' };
+        }
+        return { ok: true, type: 'navigate', url: a.text, navigating: true };
+      }
+      return { ok: false, error: 'navigate needs a url' };
+    }
+    const els = interactiveNodes(max);
+    const target = resolveAgentRef(a.ref, els);
+    if (!target) return { ok: false, error: 'element no longer visible: ' + a.ref };
+    if (a.type === 'click') {
+      try {
+        target.focus();
+        target.click();
+      } catch (e) {
+        return { ok: false, error: 'click failed: ' + e.message };
+      }
+      return { ok: true, type: 'click', text: cleanText(target.textContent, 40) };
+    }
+    if (a.type === 'type') {
+      try {
+        target.focus();
+        const proto = target.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+        setter.call(target, String(a.value || ''));
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch (e) {
+        return { ok: false, error: 'type failed: ' + e.message };
+      }
+      return { ok: true, type: 'type', length: String(a.value || '').length };
+    }
+    return { ok: false, error: 'unsupported action: ' + a.type };
+  }
+
+  function resolveAgentRef(ref, els) {
+    const m = /^el(\d+)$/.exec(String(ref || ''));
+    if (!m) return null;
+    const idx = parseInt(m[1], 10) - 1;
+    return (els && els[idx]) || null;
+  }
+
+  /* ================= agent ability router (DOM ops) ======================
+   * Content-side counterpart of background/abilities.js. Every ability is a
+   * pure DOM read or a guarded write. Background composes these into the
+   * 30-ability agent skill set. All selectors are wrapped so missing DOM APIs
+   * degrade to `[]` instead of throwing (also keeps vm unit tests simple).
+   */
+  function qsa(sel, root) {
+    try {
+      const r = root || document;
+      if (typeof r.querySelectorAll !== 'function') return [];
+      const list = r.querySelectorAll(sel);
+      return Array.from(list || []);
+    } catch {
+      return [];
+    }
+  }
+
+  function allFormControls() {
+    return qsa('input,textarea,select');
+  }
+
+  /** Resolve either an elN ref (visible interactive) or an fN ref (any form control). */
+  function resolveAnyRef(ref) {
+    if (!ref) return null;
+    const s = String(ref);
+    if (/^el\d+$/.test(s)) return resolveAgentRef(s, interactiveNodes(80));
+    const m = /^f(\d+)$/.exec(s);
+    if (m) return allFormControls()[parseInt(m[1], 10) - 1] || null;
+    return null;
+  }
+
+  function interactiveRefMap(max) {
+    const m = new Map();
+    interactiveNodes(max).forEach((el, i) => m.set(el, 'el' + (i + 1)));
+    return m;
+  }
+
+  function pageText(max) {
+    let t = '';
+    try {
+      t = document.body && document.body.innerText ? document.body.innerText : '';
+    } catch {
+      t = '';
+    }
+    return cleanText(t, max || 6000);
+  }
+
+  function fieldIndex(el) {
+    return allFormControls().indexOf(el); // -1 if not a control
+  }
+
+  function fieldLabel(inp) {
+    const id = inp.getAttribute && inp.getAttribute('id');
+    if (id) {
+      const lab = qsa('label[for="' + id.replace(/"/g, '\\"') + '"]')[0];
+      if (lab) return cleanText(lab.textContent, 40);
+    }
+    const wrap = inp.closest ? inp.closest('label') : null;
+    if (wrap) return cleanText(wrap.textContent, 40);
+    const aria = inp.getAttribute && inp.getAttribute('aria-label');
+    if (aria) return cleanText(aria, 40);
+    const placeholder = inp.getAttribute && inp.getAttribute('placeholder');
+    if (placeholder) return cleanText(placeholder, 40);
+    return '';
+  }
+
+  function readForms() {
+    const forms = [];
+    for (const f of qsa('form')) {
+      const fields = [];
+      for (const inp of qsa('input,textarea,select', f)) {
+        const sensitive = isSensitiveElement(inp);
+        const isSelect = (inp.tagName || '').toLowerCase() === 'select';
+        const field = {
+          ref: 'f' + (fieldIndex(inp) + 1),
+          tag: (inp.tagName || '').toLowerCase(),
+          type: (inp.getAttribute && inp.getAttribute('type')) || 'text',
+          name: (inp.getAttribute && inp.getAttribute('name')) || '',
+          id: (inp.getAttribute && inp.getAttribute('id')) || '',
+          placeholder: (inp.getAttribute && inp.getAttribute('placeholder')) || '',
+          label: fieldLabel(inp),
+          required: !!(inp.hasAttribute && inp.hasAttribute('required')),
+          sensitive,
+          value: sensitive ? '[REDACTED]' : String(inp.value || ''),
+        };
+        if (isSelect) field.options = qsa('option', inp).map((o) => (o && (o.getAttribute('value') || o.textContent)) || '');
+        fields.push(field);
+      }
+      forms.push({
+        index: forms.length,
+        id: (f.getAttribute && f.getAttribute('id')) || '',
+        action: (f.getAttribute && f.getAttribute('action')) || '',
+        method: (f.method || 'get').toUpperCase(),
+        fieldCount: fields.length,
+        fields,
+      });
+    }
+    return forms;
+  }
+
+  /** Set a form control's value (input/textarea/select/checkbox/radio) with events. */
+  function setFieldValue(ref, value) {
+    const el = resolveAnyRef(ref);
+    if (!el) return { ok: false, error: 'no form control for ref ' + ref };
+    const tag = (el.tagName || '').toLowerCase();
+    if (tag === 'select') {
+      let matched = false;
+      for (const o of el.options || []) {
+        if (String(o.value) === String(value) || String(o.text || '') === String(value)) {
+          el.value = o.value;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) el.value = String(value);
+      if (typeof el.dispatchEvent === 'function') el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true, type: 'select', ref, selected: el.value, options: (el.options && el.options.length) || 0 };
+    }
+    const ctype = (el.getAttribute && el.getAttribute('type') || '').toLowerCase();
+    if (tag === 'input' && (ctype === 'checkbox' || ctype === 'radio')) {
+      el.checked = typeof value === 'boolean' ? value : /^(true|1|on|yes|check)$/i.test(String(value));
+      if (typeof el.dispatchEvent === 'function') el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true, type: ctype, ref, checked: el.checked };
+    }
+    if (tag === 'input' || tag === 'textarea') {
+      const proto = tag === 'textarea'
+        ? (typeof HTMLTextAreaElement !== 'undefined' && HTMLTextAreaElement.prototype)
+        : (typeof HTMLInputElement !== 'undefined' && HTMLInputElement.prototype);
+      const setter = proto && Object.getOwnPropertyDescriptor(proto, 'value') && Object.getOwnPropertyDescriptor(proto, 'value').set;
+      if (setter) setter.call(el, String(value == null ? '' : value));
+      else el.value = String(value == null ? '' : value);
+      if (typeof el.dispatchEvent === 'function') {
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      return { ok: true, type: 'type', ref, length: String(value == null ? '' : value).length };
+    }
+    return { ok: false, error: 'not a form control: ' + ref };
+  }
+
+  function matchField(form, key) {
+    if (/^f\d+$/.test(String(key))) return form.fields.find((f) => f.ref === key) || null;
+    const k = String(key || '').toLowerCase();
+    return (
+      form.fields.find((f) => f.name && f.name.toLowerCase() === k) ||
+      form.fields.find((f) => f.id && f.id.toLowerCase() === k) ||
+      form.fields.find((f) => f.label && f.label.toLowerCase() === k) ||
+      form.fields.find((f) => f.placeholder && f.placeholder.toLowerCase() === k) ||
+      form.fields.find((f) => (f.name || f.id || '').toLowerCase().includes(k)) ||
+      null
+    );
+  }
+
+  function fillForm(args) {
+    const formIndex = args && args.formIndex != null ? Number(args.formIndex) : 0;
+    const data = (args && args.data) || {};
+    const forms = readForms();
+    const form = forms[formIndex] || null;
+    if (!form) return { ok: false, error: 'no form found at index ' + formIndex, formCount: forms.length };
+    const applied = [];
+    const unmatched = [];
+    for (const [key, value] of Object.entries(data)) {
+      const target = matchField(form, key);
+      if (!target) {
+        unmatched.push(key);
+        continue;
+      }
+      const r = setFieldValue(target.ref, value);
+      if (r.ok) applied.push({ ref: target.ref, key, value: target.sensitive ? '[REDACTED]' : String(value).slice(0, 40) });
+      else unmatched.push(key);
+    }
+    return { ok: true, formIndex: form.index, action: form.action, fieldCount: form.fields.length, applied, unmatched, filledCount: applied.length };
+  }
+
+  function submitForm(args) {
+    let form = null;
+    if (args && args.formIndex != null) form = qsa('form')[Number(args.formIndex)];
+    else if (args && args.ref) {
+      const el = resolveAnyRef(args.ref);
+      form = el && el.form;
+    } else form = qsa('form')[0];
+    if (!form) return { ok: false, error: 'no form found' };
+    const btn = qsa('button[type=submit],input[type=submit],button:not([type])', form)[0];
+    if (btn) {
+      if (typeof btn.focus === 'function') btn.focus();
+      if (typeof btn.click === 'function') btn.click();
+      return { ok: true, via: 'click', button: cleanText(btn.textContent, 20) || btn.value || 'submit' };
+    }
+    if (typeof form.requestSubmit === 'function') {
+      form.requestSubmit();
+      return { ok: true, via: 'requestSubmit' };
+    }
+    return { ok: false, error: 'form has no submit button' };
+  }
+
+  function clickElement(args) {
+    const ref = args && args.ref;
+    const text = args && args.text;
+    let target = null;
+    if (ref) target = resolveAnyRef(ref);
+    else if (text) {
+      const ql = String(text).toLowerCase();
+      target =
+        interactiveNodes(80).find((el) => {
+          const hay = [el.textContent, el.getAttribute && el.getAttribute('placeholder'), el.getAttribute && el.getAttribute('aria-label'), el.getAttribute && el.getAttribute('name')].filter(Boolean).join(' | ').toLowerCase();
+          return hay.includes(ql);
+        }) || null;
+    }
+    if (!target) return { ok: false, error: 'no clickable element found' + (ref ? ' for ref ' + ref : text ? ' matching "' + text + '"' : '') };
+    if (typeof target.focus === 'function') target.focus();
+    if (typeof target.click === 'function') target.click();
+    return { ok: true, tag: (target.tagName || '').toLowerCase(), text: cleanText(target.textContent, 40) };
+  }
+
+  function findElement(args) {
+    const q = String((args && (args.text || args.query)) || '').trim();
+    if (!q) return { ok: false, error: 'find_element needs text/query' };
+    const ql = q.toLowerCase();
+    const refMap = interactiveRefMap(80);
+    const matches = [];
+    for (const el of interactiveNodes(80)) {
+      const hay = [el.textContent, el.getAttribute && el.getAttribute('placeholder'), el.getAttribute && el.getAttribute('aria-label'), el.getAttribute && el.getAttribute('name'), el.getAttribute && el.getAttribute('title')].filter(Boolean).join(' | ').toLowerCase();
+      if (hay.includes(ql)) {
+        const r = el.getBoundingClientRect();
+        matches.push({
+          ref: refMap.get(el),
+          tag: (el.tagName || '').toLowerCase(),
+          text: cleanText(el.textContent, 40),
+          type: (el.getAttribute && el.getAttribute('type')) || '',
+          rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+        });
+      }
+    }
+    return { ok: matches.length > 0, count: matches.length, matches: matches.slice(0, 8) };
+  }
+
+  function scrollPage(args) {
+    const ref = args && args.ref;
+    if (ref) {
+      const el = resolveAnyRef(ref);
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'auto', block: 'center' });
+        return { ok: true, scrolledTo: ref };
+      }
+      return { ok: false, error: 'no element for ref ' + ref };
+    }
+    const dir = (args && args.dir) || 'down';
+    const amt = Math.abs(Number((args && args.amount) || 400));
+    const delta = (dir === 'up' ? -1 : 1) * amt;
+    try {
+      if (typeof window !== 'undefined' && typeof window.scrollBy === 'function') {
+        window.scrollBy({ top: delta, behavior: 'auto' });
+      } else if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+        window.scrollTo(0, (window.scrollY || 0) + delta);
+      } else {
+        return { ok: false, error: 'no scrolling API available' };
+      }
+    } catch (e) {
+      return { ok: false, error: 'scroll failed: ' + e.message };
+    }
+    return { ok: true, dir, amount: delta, scrollY: (window && window.scrollY) || 0 };
+  }
+
+  function navigatePage(args) {
+    const url = (args && args.url) || '';
+    if (!url) return { ok: false, error: 'navigate needs a url' };
+    if (typeof location === 'undefined' || !location.href) return { ok: false, error: 'cannot navigate in this context' };
+    try {
+      location.href = url;
+      return { ok: true, navigating: true, url };
+    } catch (e) {
+      return { ok: false, error: 'navigation failed: ' + e.message };
+    }
+  }
+
+  function extractEntities(text) {
+    const emails = new Set();
+    const phones = new Set();
+    const prices = new Set();
+    const dates = new Set();
+    const urls = new Set();
+    const re = {
+      email: /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g,
+      phone: /(?:\+\d[\d\s().-]{8,})|\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/g,
+      price: /\$\s?\d+(?:[.,]\d+)?|\b\d+(?:\.\d{2})?\s?(?:usd|eur|€|£)\b/g,
+      date: /\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s\d{1,2}(?:st|nd|rd|th)?,?\s\d{4}\b/g,
+      url: /https?:\/\/[^\s<>"']+/g,
+    };
+    for (const m of String(text || '').matchAll(re.email)) emails.add(m[0]);
+    for (const m of String(text || '').matchAll(re.phone)) phones.add(m[0].trim());
+    for (const m of String(text || '').matchAll(re.price)) prices.add(m[0].trim());
+    for (const m of String(text || '').matchAll(re.date)) dates.add(m[0].trim());
+    for (const m of String(text || '').matchAll(re.url)) urls.add(m[0].replace(/[.,;:)]+$/, ''));
+    return {
+      emails: [...emails].slice(0, 20),
+      phones: [...phones].slice(0, 20),
+      prices: [...prices].slice(0, 20),
+      dates: [...dates].slice(0, 20),
+      urls: [...urls].slice(0, 20),
+    };
+  }
+
+  function accessibilityAudit() {
+    const issues = [];
+    for (const img of qsa('img')) {
+      if (!(img.hasAttribute && img.hasAttribute('alt'))) issues.push({ severity: 'medium', type: 'missing-alt', detail: '<img> without an alt attribute' });
+      else if (img.getAttribute('alt') === '') issues.push({ severity: 'low', type: 'empty-alt', detail: 'decorative image with empty alt=""' });
+    }
+    for (const a of qsa('a')) {
+      if (!(a.textContent || '').trim() && !(a.getAttribute && a.getAttribute('aria-label')) && !(a.getAttribute && a.getAttribute('title'))) {
+        issues.push({ severity: 'medium', type: 'empty-link', detail: 'link with no accessible name' });
+      }
+    }
+    for (const b of qsa('button')) {
+      if (!(b.textContent || '').trim() && !(b.getAttribute && b.getAttribute('aria-label')) && !(b.getAttribute && b.getAttribute('title'))) {
+        issues.push({ severity: 'medium', type: 'unnamed-button', detail: 'button with no accessible name' });
+      }
+    }
+    for (const inp of qsa('input,textarea,select')) {
+      const type = (inp.getAttribute && inp.getAttribute('type')) || '';
+      if (type === 'hidden') continue;
+      const id = inp.getAttribute && inp.getAttribute('id');
+      const labeled = !!(inp.getAttribute && inp.getAttribute('aria-label')) || (id && qsa('label[for="' + id.replace(/"/g, '\\"') + '"]').length) || (inp.closest && inp.closest('label'));
+      if (!labeled) issues.push({ severity: 'low', type: 'unlabeled-control', detail: (inp.getAttribute && (inp.getAttribute('name') || inp.getAttribute('id'))) || inp.tagName + ' has no label' });
+    }
+    if (document.documentElement && !(document.documentElement.getAttribute && document.documentElement.getAttribute('lang'))) {
+      issues.push({ severity: 'low', type: 'missing-lang', detail: '<html> has no lang attribute' });
+    }
+    const heads = qsa('h1,h2,h3,h4,h5,h6').map((h) => +h.tagName[1]);
+    for (let i = 1; i < heads.length; i++) {
+      if (heads[i] > heads[i - 1] + 1) issues.push({ severity: 'low', type: 'heading-skip', detail: 'heading h' + heads[i - 1] + ' \u2192 h' + heads[i] + ' skips a level' });
+    }
+    return { count: issues.length, issues: issues.slice(0, 30) };
+  }
+
+  function pageMetadata() {
+    const g = (sel, attr) => {
+      const el = qsa(sel)[0];
+      return el && el.getAttribute ? el.getAttribute(attr) || '' : '';
+    };
+    return {
+      title: document.title || '',
+      url: (typeof location !== 'undefined' && location.href) || '',
+      description: g('meta[name="description"]', 'content'),
+      ogTitle: g('meta[property="og:title"]', 'content'),
+      ogImage: g('meta[property="og:image"]', 'content'),
+      canonical: g('link[rel="canonical"]', 'href'),
+      lang: (document.documentElement && document.documentElement.getAttribute && document.documentElement.getAttribute('lang')) || '',
+      viewport: g('meta[name="viewport"]', 'content'),
+    };
+  }
+
+  const ABILITY_ROUTER = {
+    digest: (a) => agentDigest(a && a.max ? Number(a.max) : 40),
+    text: (a) => {
+      const t = pageText(a && a.max ? Number(a.max) : 6000);
+      return { title: document.title || '', url: (typeof location !== 'undefined' && location.href) || '', chars: t.length, text: t };
+    },
+    links: () => {
+      const refMap = interactiveRefMap(80);
+      const anchors = qsa('a[href]');
+      return {
+        count: anchors.length,
+        items: anchors.slice(0, 40).map((a) => ({
+          ref: refMap.get(a) || null,
+          text: cleanText(a.textContent, 40) || (a.getAttribute && a.getAttribute('aria-label')) || '',
+          url: (a.getAttribute && a.getAttribute('href')) || '',
+        })),
+      };
+    },
+    tables: () => {
+      const out = [];
+      for (const t of qsa('table')) {
+        const rows = [];
+        for (const tr of qsa('tr', t)) {
+          const cells = qsa('th,td', tr).map((c) => cleanText(c.textContent, 60));
+          if (cells.length) rows.push(cells);
+        }
+        const cap = qsa('caption', t)[0];
+        out.push({ caption: cap ? cleanText(cap.textContent, 60) : '', rowCount: rows.length, rows: rows.slice(0, 30) });
+      }
+      return { count: out.length, tables: out.slice(0, 8) };
+    },
+    forms: () => {
+      const forms = readForms();
+      return { count: forms.length, forms };
+    },
+    form_values: () => readForms(),
+    headings: () => {
+      const items = qsa('h1,h2,h3,h4,h5,h6').map((h) => ({ level: +h.tagName[1], text: cleanText(h.textContent, 80) }));
+      return { count: items.length, items: items.slice(0, 40) };
+    },
+    entities: () => {
+      const t = pageText(12000);
+      return extractEntities(t);
+    },
+    metadata: () => pageMetadata(),
+    accessibility: () => accessibilityAudit(),
+    errors: () => {
+      const log = (globalThis.VAIA && globalThis.VAIA.errorLog) || [];
+      return { count: log.length, errors: log.slice(0, 20) };
+    },
+    viewport: () => ({
+      w: (window && window.innerWidth) || 0,
+      h: (window && window.innerHeight) || 0,
+      scrollY: (window && window.scrollY) || 0,
+      scrollHeight: (document.documentElement && document.documentElement.scrollHeight) || 0,
+      docHeight: (document.body && document.body.scrollHeight) || 0,
+    }),
+    find_element: (a) => findElement(a),
+    click: (a) => clickElement(a),
+    type: (a) => (a && a.ref ? setFieldValue(a.ref, a.value) : { ok: false, error: 'type needs a ref' }),
+    clear: (a) => (a && a.ref ? setFieldValue(a.ref, '') : { ok: false, error: 'clear needs a ref' }),
+    select: (a) => (a && a.ref ? setFieldValue(a.ref, a.value) : { ok: false, error: 'select needs a ref' }),
+    checkbox: (a) => (a && a.ref ? setFieldValue(a.ref, a.value) : { ok: false, error: 'checkbox needs a ref' }),
+    scroll: (a) => scrollPage(a),
+    navigate: (a) => navigatePage(a),
+    fill_form: (a) => fillForm(a),
+    submit_form: (a) => submitForm(a),
+  };
+
+  /** Execute one DOM ability. Returns { ok, ability, ...result } or { ok:false, error } */
+  function agentAbility(ability, args) {
+    const fn = ABILITY_ROUTER[ability];
+    if (!fn) return { ok: false, error: 'unknown ability: ' + ability, available: Object.keys(ABILITY_ROUTER) };
+    try {
+      const r = fn(args || {});
+      if (r && typeof r === 'object' && !Array.isArray(r)) return { ...r, ok: r.ok !== false, ability };
+      return { ok: !!r, ability, result: r };
+    } catch (e) {
+      return { ok: false, error: e && e.message ? e.message : String(e), ability };
+    }
+  }
+
   Object.assign(tools, {
     elementRect,
     cleanText,
@@ -404,6 +971,12 @@
     elementFromPoint,
     visibleInteractiveElements,
     pageSummary,
+    agentDigest,
+    executeAgentAction,
+    interactiveNodes,
+    agentAbility,
+    resolveAnyRef,
+    readForms,
     TAG_BLACKLIST,
   });
 })(typeof globalThis !== 'undefined' ? globalThis : this);

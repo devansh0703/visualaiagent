@@ -123,6 +123,9 @@ function buildPrompt(context) {
   for (const ev of context.recentEvents || []) {
     lines.push(`  - ${ev.tsRel || ''} ${ev.type}: ${ev.summary || ''}`);
   }
+  if (context.extra) {
+    lines.push(`\nDOM SNAPSHOT:\n${context.extra}`);
+  }
   if (context.question) {
     lines.push(`\nUSER QUESTION: ${context.question}\nAnswer this question based on the screenshot and activity above.`);
   }
@@ -304,6 +307,70 @@ function mockVision(context, prompt) {
 
 /* ------------------------------ main entry ------------------------------ */
 
+/**
+ * Dispatch a single model call to the right provider. `system` is the system
+ * prompt string; `user` is an array of content parts ({type:'text'|'image'}).
+ */
+async function callProvider({ provider, model, baseUrl, apiKey, system, user, temperature, maxTokens, timeoutMs, responseFormat = true }) {
+  const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];
+  switch (provider) {
+    case 'anthropic':
+      return anthropic({ model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs });
+    case 'gemini':
+      return gemini({ model, baseUrl, apiKey, userContent: user, temperature, maxTokens, timeoutMs });
+    case 'ollama':
+      return ollama({ model, baseUrl, apiKey, userContent: user, temperature, maxTokens, timeoutMs });
+    case 'openrouter':
+      return openaiCompatible({ model, baseUrl: baseUrl || 'https://openrouter.ai/api/v1', apiKey, messages, temperature, maxTokens, timeoutMs });
+    case 'groq':
+      return openaiCompatible({ model, baseUrl: baseUrl || 'https://api.groq.com/openai/v1', apiKey, messages, temperature, maxTokens, timeoutMs, responseFormat: false });
+    case 'openai':
+    default:
+      return openaiCompatible({ model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, responseFormat });
+  }
+}
+
+/** Free-form text generation (system + prompt + optional screenshot). Returns {provider, model, ts, text}. */
+export async function chat({ config, system = '', prompt = '', dataUrl = '', temperature, maxTokens, timeoutMs }) {
+  const vision = config.vision || {};
+  const provider = vision.provider || 'mock';
+  const candidates = await buildModelCandidates(vision, provider);
+  const user = [];
+  if (system) user.push({ type: 'text', text: system });
+  if (prompt) user.push({ type: 'text', text: prompt });
+  if (dataUrl) user.push({ type: 'image', image_url: { url: dataUrl } });
+  let lastErr = null;
+  for (let i = 0; i < candidates.length; i++) {
+    const model = candidates[i];
+    if (provider === 'mock') {
+      return { provider, model, ts: Date.now(), text: mockChatText(system, prompt) };
+    }
+    try {
+      const text = await callProvider({
+        provider,
+        model,
+        baseUrl: vision.baseUrl,
+        apiKey: vision.apiKey,
+        system,
+        user,
+        temperature: temperature ?? vision.temperature,
+        maxTokens: maxTokens ?? vision.maxTokens,
+        timeoutMs: timeoutMs ?? vision.timeoutMs,
+      });
+      return { provider, model, ts: Date.now(), text };
+    } catch (e) {
+      lastErr = e;
+      if (isRateLimit(e) || i === candidates.length - 1) break;
+      captureWarn(`${provider}: model ${model} failed (${e.message.slice(0, 120)}) — trying fallback`);
+    }
+  }
+  throw new Error(`${provider}: ${lastErr ? lastErr.message : 'all models failed'}`);
+}
+
+function mockChatText(system, prompt) {
+  return `[mock] ${String(prompt || '').slice(0, 240)}`;
+}
+
 export { extractJSON, dataUrlParts, discoverModels };
 
 export async function analyze({ config, context }) {
@@ -327,77 +394,20 @@ export async function analyze({ config, context }) {
     const model = candidates[i];
     let text = '';
     try {
-      switch (provider) {
-        case 'anthropic':
-          text = await anthropic({
-            model,
-            baseUrl: vision.baseUrl,
-            apiKey: vision.apiKey,
-            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
-            temperature: vision.temperature,
-            maxTokens: vision.maxTokens,
-            timeoutMs: vision.timeoutMs,
-          });
-          break;
-        case 'gemini':
-          text = await gemini({
-            model,
-            baseUrl: vision.baseUrl,
-            apiKey: vision.apiKey,
-            userContent,
-            temperature: vision.temperature,
-            maxTokens: vision.maxTokens,
-            timeoutMs: vision.timeoutMs,
-          });
-          break;
-        case 'ollama':
-          text = await ollama({
-            model,
-            baseUrl: vision.baseUrl,
-            apiKey: vision.apiKey,
-            userContent,
-            temperature: vision.temperature,
-            maxTokens: vision.maxTokens,
-            timeoutMs: vision.timeoutMs,
-          });
-          break;
-        case 'openrouter':
-          text = await openaiCompatible({
-            model,
-            baseUrl: vision.baseUrl || 'https://openrouter.ai/api/v1',
-            apiKey: vision.apiKey,
-            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
-            temperature: vision.temperature,
-            maxTokens: vision.maxTokens,
-            timeoutMs: vision.timeoutMs,
-          });
-          break;
-        case 'groq':
-          text = await openaiCompatible({
-            model,
-            baseUrl: vision.baseUrl || 'https://api.groq.com/openai/v1',
-            apiKey: vision.apiKey,
-            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
-            temperature: vision.temperature,
-            maxTokens: vision.maxTokens,
-            timeoutMs: vision.timeoutMs,
-            responseFormat: false,
-          });
-          break;
-        case 'mock':
-          text = mockVision(context, promptText);
-          break;
-        case 'openai':
-        default:
-          text = await openaiCompatible({
-            model,
-            baseUrl: vision.baseUrl,
-            apiKey: vision.apiKey,
-            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
-            temperature: vision.temperature,
-            maxTokens: vision.maxTokens,
-            timeoutMs: vision.timeoutMs,
-          });
+      if (provider === 'mock') {
+        text = mockVision(context, promptText);
+      } else {
+        text = await callProvider({
+          provider,
+          model,
+          baseUrl: vision.baseUrl,
+          apiKey: vision.apiKey,
+          system: systemPrompt,
+          user: userContent,
+          temperature: vision.temperature,
+          maxTokens: vision.maxTokens,
+          timeoutMs: vision.timeoutMs,
+        });
       }
     } catch (e) {
       lastErr = e;

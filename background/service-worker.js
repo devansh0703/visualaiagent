@@ -8,6 +8,8 @@ import { DEFAULTS, normalizeConfig, deepMerge, defaultModels } from '../shared/c
 import { MSG, ET, MODES } from '../shared/protocol.js';
 import { uuid, now, sanitizeUrl, LRUSet } from '../shared/utils.js';
 import { focusScoreOf } from '../shared/categories.js';
+import { attentionByHost, topHosts } from '../shared/attention.js';
+import { checkDistractionGoal } from '../shared/goals.js';
 import * as storage from './storage.js';
 import * as idb from './idb.js';
 import { Session } from './session.js';
@@ -15,6 +17,8 @@ import { InsightsEngine } from './insights.js';
 import * as capture from './capture.js';
 import * as db from './db.js';
 import * as vision from './vision.js';
+import * as agent from './agent.js';
+import * as abilities from './abilities.js';
 import { computeDigest, buildDigestBody } from './digest.js';
 import { captureLog, inc, counter, snapshot as logSnapshot } from './telemetry.js';
 
@@ -267,6 +271,7 @@ function recentSummary(s, n = 12) {
 // ---------------------------------------------------------------------------
 async function askAgent(question, tabId) {
   if (!question || !String(question).trim()) return { ok: false, error: 'empty question' };
+  const q = String(question).trim();
   let rec = null;
   try {
     rec = await capture.captureNow({ tabId, reason: 'agent_ask', session, config: getConfig(), onAnalyze: null });
@@ -278,6 +283,14 @@ async function askAgent(question, tabId) {
   const vcfg = { ...config.vision };
   if (!vcfg.provider) vcfg.provider = 'mock';
   if (!vcfg.apiKey && vcfg.provider !== 'mock' && vcfg.provider !== 'ollama') vcfg.provider = 'mock';
+  let extra = '';
+  try {
+    const t = tabId || session.tabId;
+    if (t) {
+      const res = await chrome.tabs.sendMessage(t, { type: 'vaia:agent_step', max: 30 });
+      if (res && res.digest) extra = agent.compactDigest(res.digest, 30);
+    }
+  } catch {}
   const result = await vision.analyze({
     config: { vision: vcfg },
     context: {
@@ -285,9 +298,20 @@ async function askAgent(question, tabId) {
       title: rec.title || '',
       dataUrl: rec.dataUrl,
       recentEvents: recentSummary(session, 8),
-      question: String(question).trim(),
+      extra,
+      question: q,
     },
   });
+  const raw = result.raw || {};
+  const details = {
+    screen: raw.screen || null,
+    user: raw.user || null,
+    signals: raw.signals || null,
+    anomalies: raw.anomalies || [],
+    recommendations: raw.recommendations || [],
+    promptInjection: raw.promptInjection || null,
+    privacy: raw.privacy || null,
+  };
   const insightRec = {
     id: uuid(),
     ts: now(),
@@ -298,20 +322,297 @@ async function askAgent(question, tabId) {
     signal: 'neutral',
     confidence: result.confidence ?? 0.5,
     sessionId: session ? session.id : '',
-    data: { question: String(question).trim(), answer: result.summary, provider: result.provider, model: result.model, url: rec.url },
+    data: { question: q, answer: result.summary, details, provider: result.provider, model: result.model, url: rec.url },
   };
   await idb.put('insights', insightRec);
   emitInsight(insightRec);
-  return { ok: true, answer: result.summary, model: result.model, provider: result.provider, insightId: insightRec.id };
+  return { ok: true, answer: result.summary, details, model: result.model, provider: result.provider, insightId: insightRec.id };
 }
 
-async function runDigest() {
-  const rec = await computeDigest({ idb, config, deviceId, userId, sessionId: session ? session.id : '' });
+async function analyzePage(tabId, withVision) {
+  const out = await agent.pageReport({ tabId, config, session, withVision: !!withVision });
+  if (!out.ok) return out;
+  const rec = {
+    id: uuid(),
+    ts: now(),
+    kind: 'agent',
+    type: 'page_report',
+    title: out.report.title,
+    body: out.report.body,
+    signal: out.report.signal || 'neutral',
+    confidence: out.report.confidence ?? 0.7,
+    sessionId: session ? session.id : '',
+    data: out.report.data,
+  };
+  await idb.put('insights', rec);
+  emitInsight(rec);
+  session.insights++;
+  return { ok: true, insightId: rec.id, report: out.report };
+}
+
+async function runTask(tabId, task, opts) {
+  const out = await agent.runTask({
+    tabId,
+    task,
+    config,
+    session,
+    maxSteps: opts && opts.maxSteps,
+    withScreenshots: opts && opts.withScreenshots !== false,
+  });
+  const rec = {
+    id: uuid(),
+    ts: now(),
+    kind: 'agent',
+    type: 'task_run',
+    title: `Task: ${String(task || '').slice(0, 60)}`,
+    body: out.ok ? `Task finished after ${out.steps.length} step(s): ${out.result || ''}` : `Task failed: ${out.error || ''}`,
+    signal: out.ok ? 'positive' : 'negative',
+    confidence: 0.8,
+    sessionId: session ? session.id : '',
+    data: { task, ok: out.ok, steps: out.steps, result: out.result, error: out.error || '', done: out.done === true },
+  };
+  await idb.put('insights', rec);
+  emitInsight(rec);
+  session.insights++;
+  return { ok: out.ok, insightId: rec.id, task, steps: out.steps, result: out.result, error: out.error || '', done: out.done === true };
+}
+
+// ---------------------------------------------------------------------------
+// Agent abilities (the 30-skill registry in abilities.js)
+// ---------------------------------------------------------------------------
+function buildAbilityContext(tabId) {
+  const cfg = getConfig();
+  return {
+    tabId,
+    config: cfg,
+    session,
+    isMock: () => agent.isMockVision(cfg),
+    dom: async (ability, args = {}) => {
+      try {
+        const res = await chrome.tabs.sendMessage(tabId, { type: MSG.AGENT_ABILITY, ability, args });
+        return (res && res.result) || { ok: false, error: 'content script returned nothing' };
+      } catch (e) {
+        return { ok: false, error: 'content script unreachable: ' + e.message };
+      }
+    },
+    capture: async () => {
+      try {
+        const shot = await capture.captureNow({ tabId, reason: 'ability', session, config: getConfig(), onAnalyze: null });
+        return (shot && shot.dataUrl) || null;
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
+/** Redact values that may be sensitive before persisting an ability run. */
+function redactAbilityArgs(ability, args) {
+  const a = { ...(args || {}) };
+  if (a.value && (ability === 'type_text' || ability === 'clear_field' || ability === 'select_option')) a.value = '[REDACTED]';
+  if (a.data && typeof a.data === 'object') {
+    const d = {};
+    for (const [k, v] of Object.entries(a.data)) d[k] = typeof v === 'string' && v.length > 80 ? v.slice(0, 80) + '…' : v;
+    a.data = d;
+  }
+  return a;
+}
+
+async function persistAbilityRun(ability, args, result) {
+  const ok = result.ok === true;
+  const what = `${result.name || ability}${result.form ? ' (form ' + result.form.index + ')' : ''}`;
+  let body = '';
+  if (result.filled && Array.isArray(result.filled)) {
+    body = `Filled ${result.filledCount || result.filled.length} field(s) on form ${result.form && result.form.index != null ? result.form.index : 0}${result.generated ? ' (auto-generated test data)' : ''}. ${result.unmatched && result.unmatched.length ? 'Unmatched: ' + result.unmatched.join(', ') : ''}`;
+  } else if (result.summary) {
+    body = String(result.summary).slice(0, 400);
+  } else if (result.plan) {
+    body = String(result.plan).slice(0, 400);
+  } else if (Array.isArray(result.issues) && result.issues.length) {
+    body = result.issues.length + ' issue(s): ' + result.issues.map((i) => `[${i.severity}] ${i.title}`).slice(0, 5).join(' · ');
+  } else if (result.count != null && typeof result.count === 'number') {
+    body = `${result.count} item(s) on ${result.url ? 'this page' : 'the page'}`;
+  } else if (result.description) {
+    body = String(result.description).slice(0, 400);
+  } else if (ok && (result.applied || result.steps || result.done != null)) {
+    body = result.body || 'ability completed';
+  } else {
+    body = ok ? 'completed' : String(result.error || 'failed');
+  }
+  const rec = {
+    id: uuid(),
+    ts: now(),
+    kind: 'agent',
+    type: 'agent_ability',
+    title: `Ability: ${result.name || ability}`,
+    body,
+    signal: ok ? 'neutral' : 'negative',
+    confidence: ok ? 0.8 : 0.4,
+    sessionId: session ? session.id : '',
+    data: {
+      ability,
+      name: result.name || ability,
+      category: result.category || 'agent',
+      ok,
+      args: redactAbilityArgs(ability, args),
+      result: {
+        filled: result.filled,
+        unmatched: result.unmatched,
+        generated: result.generated,
+        issues: result.issues,
+        plan: result.plan,
+        steps: result.steps,
+        done: result.done,
+        count: result.count,
+        description: result.description,
+        summary: result.summary,
+      },
+      url: result.url || (result.context && result.context.url) || '',
+    },
+  };
+  await idb.put('insights', rec);
+  emitInsight(rec);
+  session.insights++;
+  return rec;
+}
+
+async function runAbilityInTab(ability, args) {
+  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const t = tabs && tabs[0];
+  const tabId = t ? t.id : session.tabId;
+  const ctx = buildAbilityContext(tabId);
+  const result = await abilities.runAbility(ability, ctx, args || {});
+  let rec = null;
+  try {
+    rec = await persistAbilityRun(ability, args || {}, result);
+  } catch (e) {
+    captureLog('warn', 'ability insight persist failed: ' + e.message);
+  }
+  return { ...result, tabId, insightId: rec ? rec.id : null };
+}
+
+async function chatTurn(message) {
+  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const t = tabs && tabs[0];
+  const tabId = t ? t.id : session.tabId;
+  const ctx = buildAbilityContext(tabId);
+  const result = await abilities.runAbility('chat', ctx, { message });
+  const rec = {
+    id: uuid(),
+    ts: now(),
+    kind: 'agent',
+    type: 'chat_turn',
+    title: 'Chat: ' + String(message || '').slice(0, 60),
+    body: result.reply ? `${String(message || '').slice(0, 240)}\n\n→ ${String(result.reply).slice(0, 1200)}` : String(result.error || 'chat failed'),
+    signal: result.ok ? 'neutral' : 'negative',
+    confidence: result.ok ? 0.8 : 0.4,
+    sessionId: session ? session.id : '',
+    data: {
+      kind: 'chat',
+      ok: result.ok,
+      message: String(message || '').slice(0, 500),
+      reply: String(result.reply || '').slice(0, 1200),
+      provider: result.provider,
+      model: result.model,
+    },
+  };
+  await idb.put('insights', rec);
+  emitInsight(rec);
+  session.insights++;
+  return { ...result, tabId, insightId: rec.id };
+}
+
+async function runDigest(period) {
+  const rec = await computeDigest({ idb, config, deviceId, userId, sessionId: session ? session.id : '', period });
   rec.body = buildDigestBody(rec);
   await idb.put('insights', rec);
   emitInsight(rec);
-  captureLog('info', `daily digest: ${rec.data.total} events in window`);
+  captureLog('info', `${rec.type}: ${rec.data.total} events in window`);
   return rec;
+}
+
+// ---------------------------------------------------------------------------
+// Productivity goals (distraction budget)
+// ---------------------------------------------------------------------------
+async function checkGoals() {
+  const g = config.goals || {};
+  if (g.enabled !== true) return;
+  const cutoff = now() - 24 * 60 * 60 * 1000;
+  const events = [];
+  let scanned = 0;
+  await idb.each('events', {
+    index: 'ts',
+    onEach: (r) => {
+      if (++scanned > 300000) return false;
+      if (r.ts >= cutoff) events.push(r);
+    },
+  });
+  const res = checkDistractionGoal(events, config);
+  if (!res) return;
+  const dayKey = new Date().toISOString().slice(0, 10);
+  const key = `vaia:goal:${dayKey}`;
+  const stored = await storage.storageGet(key);
+  if (stored[key]) return; // already alerted today
+  await storage.storageSet({ [key]: true });
+  const minutes = Math.round(res.distractionMs / 60000);
+  const limit = Math.round(res.limitMs / 60000);
+  const top = (res.breakdown[0] || {}).host;
+  const rec = {
+    id: uuid(),
+    ts: now(),
+    kind: 'goal',
+    type: 'distraction_alert',
+    title: 'Distraction goal exceeded',
+    body: `You've spent ${minutes} min on distracting sites today (budget ${limit} min)${top ? `, most on ${top}` : ''}.`,
+    signal: 'negative',
+    confidence: 0.8,
+    sessionId: session ? session.id : '',
+    data: { ...res },
+  };
+  await idb.put('insights', rec);
+  emitInsight(rec);
+  if (g.notify) {
+    try {
+      chrome.notifications.create('vaia-goal', {
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+        title: 'Visual AI Agent — goal',
+        message: rec.body,
+        priority: 1,
+      });
+    } catch {}
+  }
+  captureLog('info', `goal alert: ${minutes} min distraction > ${limit} min`);
+}
+
+async function attentionForWindow(windowMs) {
+  const cutoff = now() - (windowMs || 60 * 60 * 1000);
+  const events = [];
+  let scanned = 0;
+  await idb.each('events', {
+    index: 'ts',
+    onEach: (r) => {
+      if (++scanned > 150000) return false;
+      if (r.ts >= cutoff) events.push(r);
+    },
+  });
+  const { byHost, totalMs } = attentionByHost(events, { nowMs: now() });
+  return { byHost, totalMs, top: topHosts(byHost, 8) };
+}
+
+async function todayFocus() {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const pages = [];
+  let scanned = 0;
+  await idb.each('events', {
+    index: 'ts',
+    onEach: (r) => {
+      if (++scanned > 200000) return false;
+      if (r.type === 'page_view' && r.ts >= start.getTime() && r.url) pages.push({ url: r.url, ts: r.ts });
+    },
+  });
+  return focusScoreOf(pages);
 }
 
 function nextDigestTime(hour) {
@@ -325,12 +626,19 @@ function nextDigestTime(hour) {
 // Tab / navigation / download events (background-side)
 // ---------------------------------------------------------------------------
 function setupTabListeners() {
-  chrome.tabs.onActivated.addListener((info) => {
+  chrome.tabs.onActivated.addListener(async (info) => {
     if (session) {
       session.tabId = info.tabId;
       session.touch();
     }
-    emitEvent({ id: uuid(), ts: now(), type: ET.TAB_ACTIVATED, url: '', title: '', data: { tabId: info.tabId } });
+    let url = '';
+    let title = '';
+    try {
+      const t = await chrome.tabs.get(info.tabId);
+      url = t.url || '';
+      title = t.title || '';
+    } catch {}
+    emitEvent({ id: uuid(), ts: now(), type: ET.TAB_ACTIVATED, url, title, data: { tabId: info.tabId, url } });
     // capture quickly so the screenshot matches the active tab
     if (config.capture && config.capture.enabled) {
       capture.captureNow({ tabId: info.tabId, reason: 'tab_activated', session, config: getConfig(), onAnalyze: onAnalyzeScreenshot });
@@ -360,6 +668,21 @@ function setupTabListeners() {
       capture.captureOnSignificant(d.tabId, session, getConfig(), onAnalyzeScreenshot);
     }
   });
+  if (chrome.windows && chrome.windows.onFocusChanged) {
+    try {
+      chrome.windows.onFocusChanged.addListener(async (windowId) => {
+        const focused = windowId !== chrome.windows.WINDOW_ID_NONE;
+        let url = '';
+        try {
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (tabs[0]) url = tabs[0].url || '';
+        } catch {}
+        emitEvent({ id: uuid(), ts: now(), type: ET.WINDOW_FOCUS, url, title: '', data: { windowId, focused, url } });
+      });
+    } catch (e) {
+      captureLog('warn', 'window focus listener: ' + e.message);
+    }
+  }
   if (chrome.downloads) {
     chrome.downloads.onChanged.addListener((delta) => {
       if (delta && delta.state && delta.state.current === 'complete') {
@@ -417,6 +740,10 @@ async function setupAlarms() {
       const hour = dg.hourOfDay != null ? dg.hourOfDay : 20;
       await chrome.alarms.create('vaia:digest', { when: nextDigestTime(hour), periodInMinutes: 60 * 24 });
     }
+    const goals = config.goals || {};
+    if (goals.enabled) {
+      await chrome.alarms.create('vaia:goals', { periodInMinutes: Math.max(15, goals.checkIntervalMinutes || 30) });
+    }
   } catch (e) {
     captureLog('warn', 'alarms setup: ' + e.message);
   }
@@ -431,6 +758,8 @@ chrome.alarms.onAlarm.addListener(async (a) => {
     await retentionCleanup();
   } else if (a.name === 'vaia:digest') {
     await runDigest();
+  } else if (a.name === 'vaia:goals') {
+    await checkGoals();
   } else if (a.name === 'vaia:heartbeat') {
     // finalize a stale session
     if (session && config.enabled && now() - session.lastActivityAt > 10 * 60 * 1000) {
@@ -626,7 +955,9 @@ async function handleMessage(msg, sender, sendResponse) {
       return;
     }
     case MSG.GET_STATS: {
-      sendResponse({ ...(await queryStats()), db: db.getStatus(), queue: await db.getQueueStats() });
+      const attention = await attentionForWindow(60 * 60 * 1000);
+      const focusToday = await todayFocus();
+      sendResponse({ ...(await queryStats()), db: db.getStatus(), queue: await db.getQueueStats(), attention, focusToday });
       return;
     }
     case MSG.ASK_AGENT: {
@@ -647,8 +978,8 @@ async function handleMessage(msg, sender, sendResponse) {
     }
     case MSG.RUN_DIGEST: {
       try {
-        const rec = await runDigest();
-        sendResponse({ ok: true, insightId: rec && rec.id });
+        const rec = await runDigest(msg.period);
+        sendResponse({ ok: true, insightId: rec && rec.id, type: rec && rec.type });
       } catch (e) {
         sendResponse({ ok: false, error: e.message });
       }
@@ -662,6 +993,54 @@ async function handleMessage(msg, sender, sendResponse) {
         sendResponse({ url: t.url, title: t.title, summary: res && res.summary });
       } catch (e) {
         sendResponse({ error: e.message });
+      }
+      return;
+    }
+    case MSG.ANALYZE_PAGE: {
+      try {
+        const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        const t = tabs[0];
+        const out = await analyzePage(t ? t.id : session.tabId, msg.withVision);
+        sendResponse(out);
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
+      }
+      return;
+    }
+    case MSG.RUN_TASK: {
+      try {
+        const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        const t = tabs[0];
+        const out = await runTask(t ? t.id : session.tabId, msg.task, msg.opts || {});
+        sendResponse(out);
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
+      }
+      return;
+    }
+    case MSG.LIST_ABILITIES: {
+      try {
+        sendResponse({ ok: true, count: abilities.listAbilities().length, abilities: abilities.listAbilities() });
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
+      }
+      return;
+    }
+    case MSG.RUN_ABILITY: {
+      try {
+        const out = await runAbilityInTab(msg.ability, msg.args || {});
+        sendResponse(out);
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
+      }
+      return;
+    }
+    case MSG.CHAT: {
+      try {
+        const out = await chatTurn(String(msg.message || '').slice(0, 4000));
+        sendResponse(out);
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
       }
       return;
     }
@@ -792,6 +1171,10 @@ function getStatePayload() {
       vision: { ...config.vision, apiKey: config.vision.apiKey ? '•••' : '' },
       privacy: config.privacy,
       identity: { ...config.identity },
+      insights: config.insights,
+      digest: config.digest,
+      goals: config.goals,
+      ui: config.ui,
     },
     counters: { ...counterAll() },
     log: logSnapshot(),

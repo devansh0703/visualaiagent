@@ -34,6 +34,23 @@ single, local-first, privacy-respecting extension you fully control.
 - End-of-session LLM summaries
 - Live heatmap overlay (clicks / mouse movement) rendered in the page
 
+### Built-in agent (page reports + computer use)
+The extension can act like a real browser agent (OpenAI Operator / Anthropic
+computer use / browser-use) — fully offline via the `mock` provider:
+- **Ask the agent** — chat about the current tab with a vision model
+- **Page report** — deep page understanding from a DOM snapshot (+ optional
+  screenshot): page type, summary, key points, extractable data, actions,
+  forms, accessibility/UX issues, recommendations
+- **Run a task** — natural-language computer use: the agent loops
+  `look → decide → act` (`click` / `type` / `scroll` / `navigate`) against a
+  stable element-ref snapshot (`el1`, `el2`, …) of the visible page until the
+  task is done or the step budget (8) is exhausted
+- Every report and task run is persisted as an insight (`page_report`,
+  `task_run`) and shown in the dashboard **Agent** tab with a step-by-step
+  transcript of the actions it took
+- Privacy: actions are executed on the real page, but keystrokes typed by the
+  agent still go through the same masking/redaction rules as the user's
+
 ### Local-first database sync
 - Every event is stored in IndexedDB first — the DB is an offline outbound
   queue, so nothing is lost when offline
@@ -60,6 +77,14 @@ single, local-first, privacy-respecting extension you fully control.
 Open the popup, set your **database endpoint** and **vision provider keys** in
 Options, and load any page — the dashboard (`VAIA Dashboard` button) shows the
 live feed, sessions, frame replay, insights, and heatmaps.
+
+To try the agent features offline, open the popup's **Task** card: press
+**Analyze page** for a page report, or type a task (e.g. *"Click the first
+button"*) and hit Run — with the default `mock` vision provider everything
+works with no API key. The dashboard's **Agent** tab shows every report and
+task transcript.
+
+Screenshots of the dashboard and agent runs live in `demo/`.
 
 ## Keyboard shortcuts
 
@@ -103,6 +128,9 @@ format used by the extension:
 | `/api/events\|screenshots\|insights\|sessions` | GET | read back (limit/type/from/to) |
 | `/api/stats` | GET | aggregated counts + event-type distribution |
 | `/api/heatmap` | GET | click coordinates |
+| `/api/attention` | GET | time-per-host attention totals |
+| `/api/focus` | GET | focus sessions & distraction budget breakdown |
+| `/api/insights` | GET | insights with agent `kind` (page reports, task runs) |
 | `/demo` | GET | a small page for exercising the extension |
 | `/health` | GET | liveness |
 
@@ -116,6 +144,7 @@ content/content.js          activity tracker + heatmap overlay
 content/element-tools.js    DOM attribution, xpath/css fingerprinting, a11y
 content/privacy-scan.js     sensitive-field detection (WeakSet-cached)
 background/service-worker.js orchestrator: routing, sessions, tabs, flushing
+background/agent.js         agentic layer: page reports + computer-use task loop
 background/capture.js       capture pipeline (offscreen re-encode)
 background/vision.js        6 vision providers + offline mock
 background/insights.js      heuristic detectors + LLM summaries
@@ -134,11 +163,12 @@ HTTP.
 ## Testing
 
 ```bash
-npm test            # 38 unit tests (config, utils, element-tools, session, insights, vision, db)
+npm test            # 88 unit tests (config, utils, element-tools, session, insights, vision, db, agent)
 npm run test:integration  # live provider checks — skips without keys
 npm run e2e   # loads the real extension in headless Chrome (puppeteer-core +
               #   system Chrome), drives the /demo page, and verifies tracking,
-              #   redaction, capture, vision, and the full receiver round-trip
+              #   redaction, capture, vision, agent page-reports + task loop,
+              #   and the full receiver round-trip
 ```
 
 The live integration test runs against **Groq** when `GROQ_API_KEY` is set

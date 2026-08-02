@@ -479,22 +479,28 @@
   // ---- errors ---------------------------------------------------------------
   function onWindowError(e) {
     if (!cfg.tracking.trackErrors) return;
-    emit('error', {
+    const rec = {
       message: tools.sanitizeText(String(e.message || '').slice(0, 300)),
       source: String(e.filename || '').slice(0, 300),
       line: e.lineno,
       col: e.colno,
       stack: String(e.error && e.error.stack ? e.error.stack : '').slice(0, 600),
-    });
+      ts: Date.now(),
+    };
+    pushErrorLog(rec);
+    emit('error', rec);
   }
 
   function onUnhandledRejection(e) {
     if (!cfg.tracking.trackErrors) return;
     const r = e.reason;
-    emit('unhandled_rejection', {
+    const rec = {
       message: tools.sanitizeText(String((r && (r.message || r.name)) || r || '').slice(0, 300)),
       stack: String(r && r.stack ? r.stack : '').slice(0, 600),
-    });
+      ts: Date.now(),
+    };
+    pushErrorLog(rec);
+    emit('unhandled_rejection', rec);
   }
 
   function onResourceError(e) {
@@ -506,7 +512,17 @@
 
   function onConsoleError(args) {
     if (!cfg.tracking.trackErrors) return;
-    emit('console_error', { args: args.map((a) => tools.sanitizeText(String(a).slice(0, 200))).slice(0, 8) });
+    const rec = { args: args.map((a) => tools.sanitizeText(String(a).slice(0, 200))).slice(0, 8), ts: Date.now() };
+    pushErrorLog(rec);
+    emit('console_error', rec);
+  }
+
+  // small in-page error ring buffer so the agent's `errors` ability can
+  // report live page health without asking the background.
+  function pushErrorLog(rec) {
+    const log = (VAIA.errorLog = VAIA.errorLog || []);
+    log.unshift(rec);
+    if (log.length > 50) log.length = 50;
   }
 
   // ---- visibility / misc -----------------------------------------------------
@@ -685,6 +701,15 @@
     switch (msg.type) {
       case 'vaia:scan_page':
         sendResponse({ summary: tools.pageSummary(Number(msg.maxElements) || 80) });
+        return true;
+      case 'vaia:agent_step':
+        sendResponse({ digest: tools.agentDigest(Number(msg.max) || 40) });
+        return true;
+      case 'vaia:agent_execute':
+        sendResponse({ result: tools.executeAgentAction(msg.action, Number(msg.max) || 40) });
+        return true;
+      case 'vaia:agent_ability':
+        sendResponse({ result: tools.agentAbility(msg.ability, msg.args || {}) });
         return true;
       case 'vaia:heatmap':
         if (msg.action === 'toggle') sendResponse({ mode: heatmap.toggle(msg.mode || 'clicks') });

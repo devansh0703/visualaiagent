@@ -90,3 +90,81 @@ test('getRole maps tags and roles', () => {
   assert.equal(tools.getRole(mkEl('nav')), 'navigation');
   assert.equal(tools.getRole(mkEl('div', { attrs: { role: 'dialog' } })), 'dialog');
 });
+
+function buildAgentSandbox(html, elems) {
+  const doc = makeDocument(html);
+  doc.querySelectorAll = (sel) => (sel.includes(',') ? elems : []);
+  doc.body = { innerText: 'Hello agent world', textContent: 'Hello agent world' };
+  const sandbox = sandboxWith({ document: doc });
+  sandbox.getComputedStyle = () => ({ visibility: 'visible', display: 'block' });
+  sandbox.HTMLInputElement = function () {};
+  sandbox.HTMLInputElement.prototype = {};
+  sandbox.HTMLTextAreaElement = function () {};
+  sandbox.HTMLTextAreaElement.prototype = {};
+  sandbox.Event = class Event {
+    constructor(type) {
+      this.type = type;
+    }
+  };
+  return sandbox;
+}
+
+function loadToolsIn(sandbox) {
+  vm.createContext(sandbox);
+  vm.runInContext(code, sandbox, { filename: 'element-tools.js' });
+  return sandbox.VAIA.tools;
+}
+
+test('agentDigest assigns stable elN refs in document order', () => {
+  const html = mkEl('html');
+  const btn = mkEl('button', { text: 'Do it', parent: html });
+  const input = mkEl('input', { attrs: { type: 'text' }, parent: html });
+  const tools = loadToolsIn(buildAgentSandbox(html, [btn, input]));
+  const digest = tools.agentDigest(10);
+  assert.equal(digest.elements.length, 2);
+  assert.equal(digest.elements[0].ref, 'el1');
+  assert.equal(digest.elements[0].tag, 'button');
+  assert.equal(digest.elements[1].ref, 'el2');
+  assert.equal(digest.elements[1].tag, 'input');
+  assert.equal(digest.url, 'https://x.com/a?q=1');
+  assert.ok(digest.text.includes('Hello agent world'));
+});
+
+test('executeAgentAction clicks an element by ref', () => {
+  const html = mkEl('html');
+  const btn = mkEl('button', { text: 'Do it', parent: html });
+  btn.focus = () => {};
+  let clicked = false;
+  btn.click = () => {
+    clicked = true;
+  };
+  const tools = loadToolsIn(buildAgentSandbox(html, [btn]));
+  const res = tools.executeAgentAction({ type: 'click', ref: 'el1' });
+  assert.equal(res.ok, true);
+  assert.equal(res.type, 'click');
+  assert.equal(clicked, true);
+});
+
+test('executeAgentAction types into an input by ref and fires input/change', () => {
+  const html = mkEl('html');
+  const input = mkEl('input', { attrs: { type: 'text' }, parent: html });
+  input.focus = () => {};
+  const dispatched = [];
+  input.dispatchEvent = (e) => dispatched.push(e.type);
+  const sandbox = buildAgentSandbox(html, [input]);
+  Object.defineProperty(sandbox.HTMLInputElement.prototype, 'value', { set(v) { this._v = v; } });
+  const tools = loadToolsIn(sandbox);
+  const res = tools.executeAgentAction({ type: 'type', ref: 'el1', value: 'hello' });
+  assert.equal(res.ok, true);
+  assert.equal(res.length, 5);
+  assert.deepEqual(dispatched, ['input', 'change']);
+  assert.equal(input._v, 'hello');
+});
+
+test('executeAgentAction fails gracefully on an unknown ref', () => {
+  const html = mkEl('html');
+  const tools = loadToolsIn(buildAgentSandbox(html, []));
+  const res = tools.executeAgentAction({ type: 'click', ref: 'el99' });
+  assert.equal(res.ok, false);
+  assert.match(res.error, /no longer visible/);
+});

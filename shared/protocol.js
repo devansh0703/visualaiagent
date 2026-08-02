@@ -42,6 +42,12 @@ export const MSG = {
   GET_MODELS: 'vaia:get_models',
   RUN_DIGEST: 'vaia:run_digest',
   GET_PREVIEW: 'vaia:get_preview',
+  ANALYZE_PAGE: 'vaia:analyze_page',
+  RUN_TASK: 'vaia:run_task',
+  AGENT_ABILITY: 'vaia:agent_ability',
+  RUN_ABILITY: 'vaia:run_ability',
+  LIST_ABILITIES: 'vaia:list_abilities',
+  CHAT: 'vaia:chat',
 };
 
 /** High-level telemetry event kinds emitted by the tracker. */
@@ -88,6 +94,7 @@ export const ET = {
   NETWORK: 'network',
   SELECTION: 'selection',
   SCREENSHOT: 'screenshot',
+  WINDOW_FOCUS: 'window_focus',
   SESSION_START: 'session_start',
   SESSION_END: 'session_end',
   INSIGHT: 'insight',
