@@ -424,6 +424,9 @@ function agentCard(d, when) {
     const checks = r.passed != null ? `<div class="sec">Checks</div><div class="kv">passed ${r.passed} \u00b7 failed ${r.failed}${r.citations != null ? ' \u00b7 sources ' + r.citations : ''}</div>` : '';
     const tools = (r.tools || []).map((x) => `<li><span class="mono">${esc(typeof x === 'string' ? x : x.name)}</span> ${esc(typeof x === 'string' ? '' : x.description || '')}</li>`).join('');
     const tabs = (r.tabs || []).map((tb) => `<li>${tb.active ? '\u25b6' : ' '} <span class="mono">${esc(tb.title || tb.url || '')}</span></li>`).join('');
+    const memory = (r.entries || []).map((e) => `<li><span class="tag">${esc(e.kind || 'note')}</span> <span class="mono">${esc(e.key || '')}</span> — ${esc(String(e.value || '').slice(0, 120))}</li>`).join('');
+    const textOut = r.text ? `<pre class="sec mono" style="white-space:pre-wrap;font-size:11px;max-height:200px;overflow:auto">${esc(String(r.text).slice(0, 2000))}</pre>` : '';
+    const jsOut = r.result && !r.text ? `<div class="kv">result (<span class="mono">${esc(r.type || '?')}</span>): <span class="mono">${esc(String(r.result).slice(0, 600))}</span></div>` : '';
     return `<div class="agent">
       <h3>${esc(d.title || 'Ability')}</h3>
       <p>${esc(d.body || '')}</p>
@@ -437,6 +440,9 @@ function agentCard(d, when) {
       ${sources ? `<div class="sec">Sources (${r.sources.length})</div><ul>${sources}</ul>` : ''}
       ${tools ? `<div class="sec">MCP tools (${r.toolCount != null ? r.toolCount : r.tools.length})</div><ul>${tools}</ul>` : ''}
       ${tabs ? `<div class="sec">Tabs</div><ul>${tabs}</ul>` : ''}
+      ${memory ? `<div class="sec">Memory</div><ul>${memory}</ul>` : ''}
+      ${textOut}
+      ${jsOut}
       <div class="meta">${ts(when)} \u00b7 ${esc(d.ok ? 'ok' : 'failed')} \u00b7 ${esc(d.ability || '')} \u00b7 ${esc(d.category || '')}</div>
     </div>`;
   }

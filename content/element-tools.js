@@ -873,6 +873,80 @@
     return { ok: true, type: 'right_click', text: cleanText(target.textContent, 40) };
   }
 
+  function middleClickElement(args) {
+    const target = resolveTarget(args);
+    if (!target) return { ok: false, error: 'no element found to middle-click' };
+    const r = target.getBoundingClientRect();
+    const init = { bubbles: true, cancelable: true, clientX: Math.round(r.x + r.width / 2), clientY: Math.round(r.y + r.height / 2), button: 1 };
+    fireEvent(target, 'pointerdown', init);
+    fireEvent(target, 'mousedown', init);
+    fireEvent(target, 'pointerup', init);
+    fireEvent(target, 'mouseup', init);
+    fireEvent(target, 'auxclick', init);
+    return { ok: true, type: 'middle_click', text: cleanText(target.textContent, 40) };
+  }
+
+  function tripleClickElement(args) {
+    const target = resolveTarget(args);
+    if (!target) return { ok: false, error: 'no element found to triple-click' };
+    const r = target.getBoundingClientRect();
+    const init = { bubbles: true, cancelable: true, clientX: Math.round(r.x + r.width / 2), clientY: Math.round(r.y + r.height / 2), button: 0 };
+    for (let i = 0; i < 3; i++) {
+      fireEvent(target, 'pointerdown', init);
+      fireEvent(target, 'mousedown', init);
+      fireEvent(target, 'pointerup', init);
+      fireEvent(target, 'mouseup', init);
+      fireEvent(target, 'click', init);
+    }
+    fireEvent(target, 'dblclick', init);
+    fireEvent(target, 'dblclick', init);
+    return { ok: true, type: 'triple_click', text: cleanText(target.textContent, 40) };
+  }
+
+  /** left_mouse_down / left_mouse_up fine-grained control (button + state). */
+  function mouseButton(args) {
+    const target = resolveTarget(args);
+    if (!target) return { ok: false, error: 'no element found' };
+    const r = target.getBoundingClientRect();
+    const button = { left: 0, middle: 1, right: 2 }[String(args.button || 'left').toLowerCase()] ?? 0;
+    const state = String(args.state || 'down').toLowerCase();
+    const init = { bubbles: true, cancelable: true, clientX: Math.round(r.x + r.width / 2), clientY: Math.round(r.y + r.height / 2), button };
+    if (state === 'down' || state === 'press') {
+      fireEvent(target, 'pointerdown', init);
+      fireEvent(target, 'mousedown', init);
+    } else if (state === 'up' || state === 'release') {
+      fireEvent(target, 'pointerup', init);
+      fireEvent(target, 'mouseup', init);
+    } else {
+      return { ok: false, error: 'mouse_button state must be "down" or "up"' };
+    }
+    return { ok: true, type: 'mouse_button', button, state };
+  }
+
+  /** hold_key: press a key, wait, release (for keyboard shortcuts with duration). */
+  async function holdKey(args) {
+    const key = String((args && args.key) || '').trim();
+    if (!key) return { ok: false, error: 'hold_key needs a key' };
+    const duration = Math.min(10, Math.max(0, Number((args && args.seconds) || 1)));
+    const target = (args && args.ref ? resolveAnyRef(args.ref) : null) || (typeof document !== 'undefined' && document.activeElement) || (typeof document !== 'undefined' ? document.body : null);
+    if (!target) return { ok: false, error: 'no focused element to hold keys on' };
+    const init = {
+      bubbles: true,
+      cancelable: true,
+      key,
+      code: (args && args.code) || key,
+      ctrlKey: !!(args && args.ctrl),
+      altKey: !!(args && args.alt),
+      shiftKey: !!(args && args.shift),
+      metaKey: !!(args && args.meta),
+    };
+    fireEvent(target, 'keydown', init);
+    const started = Date.now();
+    await new Promise((r) => setTimeout(r, Math.max(0, duration * 1000)));
+    fireEvent(target, 'keyup', init);
+    return { ok: true, type: 'hold_key', key, heldSec: duration, elapsedMs: Date.now() - started };
+  }
+
   function keyPress(args) {
     const key = String((args && args.key) || '').trim();
     if (!key) return { ok: false, error: 'key_press needs a key (e.g. Enter, Escape, Tab, "a", ctrl+s)' };
@@ -998,6 +1072,67 @@
       charCount: text.length,
       text: text.slice(0, 8000),
     };
+  }
+
+  /** Find any element (interactive or not) whose text/label includes `ql`. */
+  function findElementByText(sel, ql) {
+    return (
+      qsa(sel).find((el) => {
+        const hay = [el.textContent, el.getAttribute && el.getAttribute('placeholder'), el.getAttribute && el.getAttribute('aria-label'), el.getAttribute && el.getAttribute('title')].filter(Boolean).join(' | ').toLowerCase();
+        return hay.includes(ql);
+      }) || null
+    );
+  }
+
+  /** Browser equivalent of the text-editor tool: str_replace on the live page. */
+  function editPage(args) {
+    const find = String((args && (args.text || args.find)) || '').trim();
+    const value = args && args.value != null ? String(args.value) : null;
+    let target = null;
+    if (args && args.ref) target = resolveAnyRef(args.ref);
+    else if (find) {
+      target = findElementByText('a,button,input,select,textarea,summary,[contenteditable],h1,h2,h3,h4,h5,h6,p,li,label,span,div,code,blockquote,td,th', find.toLowerCase());
+    }
+    if (!target) return { ok: false, error: 'edit_page found no element' + (find ? ' matching "' + find + '"' : '') };
+    const tag = (target.tagName || '').toLowerCase();
+    const before = cleanText(target.textContent, 60);
+    let after = '';
+    if (tag === 'input' || tag === 'textarea') {
+      const proto = tag === 'textarea'
+        ? (typeof HTMLTextAreaElement !== 'undefined' && HTMLTextAreaElement.prototype)
+        : (typeof HTMLInputElement !== 'undefined' && HTMLInputElement.prototype);
+      const setter = proto && Object.getOwnPropertyDescriptor(proto, 'value') && Object.getOwnPropertyDescriptor(proto, 'value').set;
+      if (setter) setter.call(target, value == null ? '' : value);
+      else target.value = value == null ? '' : value;
+      fireEvent(target, 'input', { bubbles: true });
+      fireEvent(target, 'change', { bubbles: true });
+      after = String(target.value || '');
+    } else {
+      target.textContent = value == null ? '' : value;
+      fireEvent(target, 'input', { bubbles: true });
+      after = cleanText(target.textContent, 60);
+    }
+    return { ok: true, tag, ref: args && args.ref, before, after, chars: after.length };
+  }
+
+  function serializeResult(r) {
+    if (r == null) return String(r);
+    if (typeof r === 'object') {
+      try {
+        const s = JSON.stringify(r);
+        if (s !== undefined) return s.slice(0, 4000);
+      } catch {}
+    }
+    return String(r);
+  }
+
+  /** Browser equivalent of the bash tool: run JS in the page, return its value. */
+  function runJs(args) {
+    const code = String((args && (args.code || args.script)) || '').trim();
+    if (!code) return { ok: false, error: 'run_js needs code' };
+    const fn = new Function('"use strict"; ' + code);
+    const result = fn();
+    return { ok: true, result: serializeResult(result), type: result === null ? 'null' : typeof result };
   }
 
   async function clipboardRead() {
@@ -1179,11 +1314,17 @@
     hover: (a) => hoverElement(a),
     double_click: (a) => doubleClickElement(a),
     right_click: (a) => rightClickElement(a),
+    middle_click: (a) => middleClickElement(a),
+    triple_click: (a) => tripleClickElement(a),
+    mouse_button: (a) => mouseButton(a),
     key_press: (a) => keyPress(a),
+    hold_key: (a) => holdKey(a),
     drag: (a) => dragElement(a),
     focus: (a) => focusElement(a),
     element_state: (a) => elementState(a),
     readable: () => readableContent(),
+    edit_page: (a) => editPage(a),
+    run_js: (a) => runJs(a),
     clipboard_read: () => clipboardRead(),
     clipboard_write: (a) => clipboardWrite(a),
   };
@@ -1236,6 +1377,8 @@
     resolveTarget,
     elementState,
     readableContent,
+    editPage,
+    runJs,
     TAG_BLACKLIST,
   });
 })(typeof globalThis !== 'undefined' ? globalThis : this);

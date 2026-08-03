@@ -388,6 +388,51 @@ async function queryInsights(opts) {
   return out;
 }
 
+/* ---- persistent agent memory (browser equivalent of the memory tool) ----- */
+
+const MEMORY_KEY = 'vaia:agent-memory';
+
+async function readMemory() {
+  const raw = await chrome.storage.local.get(MEMORY_KEY);
+  return (raw && raw[MEMORY_KEY]) || {};
+}
+
+async function writeMemory(map) {
+  await chrome.storage.local.set({ [MEMORY_KEY]: map });
+}
+
+async function memorySet(key, value, kind) {
+  const map = await readMemory();
+  map[key] = { value: String(value || ''), kind: kind || 'note', updatedAt: now() };
+  await writeMemory(map);
+  return map;
+}
+
+async function memoryRemove(key) {
+  const map = await readMemory();
+  delete map[key];
+  await writeMemory(map);
+  return map;
+}
+
+/* ---- zoom-style region capture via the offscreen document ---------------- */
+
+async function cropImage({ dataUrl, x, y, w, h }) {
+  try {
+    if (chrome.offscreen) {
+      const existing = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+      if (!existing.length) {
+        await capture.ensureOffscreen();
+      }
+      const res = await chrome.runtime.sendMessage({ type: 'vaia:crop_image', id: uuid(), dataUrl, x, y, w, h });
+      if (res && res.dataUrl) return res;
+    }
+  } catch (e) {
+    captureLog('warn', 'crop failed: ' + e.message);
+  }
+  return null;
+}
+
 function buildAbilityContext(tabId) {
   const cfg = getConfig();
   const ctx = {
@@ -411,6 +456,34 @@ function buildAbilityContext(tabId) {
         return null;
       }
     },
+    runJs: async (code) => {
+      if (typeof chrome.scripting === 'undefined') return null;
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: 'MAIN',
+          func: (src) => {
+            const fn = new Function('"use strict";' + String(src));
+            const v = fn();
+            if (v == null) return { type: String(v), result: String(v) };
+            if (typeof v === 'object') {
+              try {
+                const s = JSON.stringify(v);
+                return { type: typeof v, result: s === undefined ? String(v) : s.slice(0, 4000) };
+              } catch {
+                return { type: typeof v, result: String(v) };
+              }
+            }
+            return { type: typeof v, result: String(v) };
+          },
+          args: [code],
+        });
+        const r = results && results[0] && results[0].result;
+        return r ? { ok: true, type: r.type, result: r.result } : { ok: false, error: 'run_js returned no value' };
+      } catch (e) {
+        return { ok: false, error: e && e.message ? e.message : String(e) };
+      }
+    },
     tabs: chrome.tabs,
     windows: chrome.windows,
     queryEvents: async (opts) => (await queryEvents(opts || {})) || [],
@@ -429,6 +502,37 @@ function buildAbilityContext(tabId) {
       const t = bgTasks.get(ctx.taskId);
       return !!(t && t.cancelled);
     },
+    memory: {
+      get: async (key) => {
+        const map = await readMemory();
+        return map[key] || null;
+      },
+      list: async () => {
+        const map = await readMemory();
+        return Object.entries(map).map(([key, v]) => ({ key, ...v }));
+      },
+      set: (key, value, kind) => memorySet(key, value, kind),
+      remove: (key) => memoryRemove(key),
+    },
+    notify: async (n) => {
+      try {
+        await chrome.notifications.create(n.id || 'vaia-ability', {
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+          title: String(n.title || 'Visual AI Agent').slice(0, 60),
+          message: String(n.message || '').slice(0, 240),
+        });
+        return true;
+      } catch (e) {
+        return false;
+      }
+    },
+    download: async (d) => {
+      const id = await chrome.downloads.download({ url: d.url, filename: d.filename || undefined, saveAs: !!d.saveAs });
+      return id;
+    },
+    schedule: async (s) => scheduleTask({ ability: s.ability, args: s.args, note: s.note, delaySec: s.delaySec }),
+    cropImage: (opts) => cropImage(opts),
   };
   return ctx;
 }
@@ -840,8 +944,49 @@ chrome.alarms.onAlarm.addListener(async (a) => {
       await startSession();
     }
     updateBadge();
+  } else if (a.name.startsWith('vaia:sched:')) {
+    await runScheduledTask(a.name.slice('vaia:sched:'.length));
   }
 });
+
+/** One-shot scheduled task (browser equivalent of Claude Desktop scheduled tasks). */
+const scheduledTasks = new Map(); // id -> { ability, args, note, scheduledAt, runsAt }
+
+async function scheduleTask({ ability, args, note, delaySec }) {
+  const id = uuid().slice(0, 8);
+  const runsAt = now() + Math.round(delaySec * 1000);
+  scheduledTasks.set(id, { ability, args: args || {}, note: String(note || ''), scheduledAt: now(), runsAt });
+  try {
+    await chrome.alarms.create('vaia:sched:' + id, { when: runsAt });
+  } catch (e) {
+    scheduledTasks.delete(id);
+    throw e;
+  }
+  return { id, ability, runsAt, note: scheduledTasks.get(id).note };
+}
+
+async function runScheduledTask(id) {
+  const t = scheduledTasks.get(id);
+  if (!t) return;
+  const { ability, args } = t;
+  try {
+    const ctx = buildAbilityContext(null);
+    const result = await abilities.runAbility(ability, ctx, args);
+    await persistAbilityRun(ability, args, result);
+    if (chrome.notifications) {
+      chrome.notifications.create('vaia-sched-' + id, {
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+        title: `Scheduled: ${ability}`,
+        message: (result.ok ? 'Done: ' : 'Failed: ') + String(result.summary || result.error || result.body || 'ok').slice(0, 180),
+      });
+    }
+  } catch (e) {
+    captureLog('error', 'scheduled task failed: ' + e.message);
+  } finally {
+    scheduledTasks.delete(id);
+  }
+}
 
 chrome.commands.onCommand.addListener(async (command) => {
   try {

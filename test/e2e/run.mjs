@@ -279,12 +279,12 @@ async function main() {
       JSON.stringify(aIns && aIns.insights && aIns.insights.filter((r) => r.kind === 'agent').map((r) => r.type))
     );
 
-    // 11e. abilities registry responds with 56 skills
+    // 11e. abilities registry responds with 73 skills
     console.log('[e2e] abilities + chatbot + form filling…');
     const alist = await extCall(extPage, { type: 'vaia:list_abilities' });
     check(
-      '56 abilities listed across 4 categories',
-      !!alist && alist.ok && alist.count === 56 && ['read', 'write', 'agent', 'meta'].every((c) => alist.abilities.some((a) => a.category === c)),
+      '73 abilities listed across 4 categories',
+      !!alist && alist.ok && alist.count === 73 && ['read', 'write', 'agent', 'meta'].every((c) => alist.abilities.some((a) => a.category === c)),
       JSON.stringify(alist && { count: alist.count, cats: alist.abilities && [...new Set(alist.abilities.map((a) => a.category))] })
     );
 
@@ -330,6 +330,45 @@ async function main() {
       'deep_research returns an offline cited report',
       !!dr && dr.ok && typeof dr.report === 'string' && dr.report.length > 20 && Array.isArray(dr.sources) && dr.sources.length > 0,
       JSON.stringify(dr && (dr.error || { reportChars: dr.report && dr.report.length, sources: dr.sources && dr.sources.length }))
+    );
+
+    // 11g3. Phase 2 abilities (Claude Desktop equivalents) round-trip
+    const ws = await extCall(extPage, { type: 'vaia:run_ability', ability: 'web_search', args: { query: 'claude desktop abilities' } });
+    check(
+      'web_search returns ranked sources (offline synthetic)',
+      !!ws && ws.ok && ws.live === false && ws.count >= 1 && Array.isArray(ws.results) && ws.results.every((r) => r.title && r.url),
+      JSON.stringify(ws && (ws.error || { count: ws.count, live: ws.live }))
+    );
+    const wf = await extCall(extPage, { type: 'vaia:run_ability', ability: 'web_fetch', args: { url: 'https://example.com' } });
+    check(
+      'web_fetch returns offline placeholder text',
+      !!wf && wf.ok && wf.mock === true && /\[offline\]/.test(wf.text),
+      JSON.stringify(wf && (wf.error || wf.mock))
+    );
+    const mem = await extCall(extPage, { type: 'vaia:run_ability', ability: 'memory_remember', args: { key: 'e2e-note', value: 'claude desktop mapping', kind: 'note' } });
+    const recall = await extCall(extPage, { type: 'vaia:run_ability', ability: 'memory_recall', args: { query: 'claude' } });
+    check(
+      'memory_remember + memory_recall round-trip',
+      !!mem && mem.ok && !!recall && recall.ok && recall.count >= 1,
+      JSON.stringify(recall && (recall.error || { count: recall.count, entries: recall.entries && recall.entries.slice(0, 1) }))
+    );
+    const rjs = await extCall(extPage, { type: 'vaia:run_ability', ability: 'run_js', args: { code: 'return document.title' } });
+    check(
+      'run_js evaluates code in the page',
+      !!rjs && rjs.ok && rjs.type === 'string' && typeof rjs.result === 'string' && rjs.result.length > 0,
+      JSON.stringify(rjs && (rjs.error || { type: rjs.type, result: rjs.result }))
+    );
+    const now = await extCall(extPage, { type: 'vaia:run_ability', ability: 'current_time' });
+    check(
+      'current_time returns the system clock',
+      !!now && now.ok && /^\d{4}-\d{2}-\d{2}T/.test(now.iso),
+      JSON.stringify(now && (now.error || now.iso))
+    );
+    const ep = await extCall(extPage, { type: 'vaia:run_ability', ability: 'edit_page', args: { text: 'VAIA Activity Demo', value: 'VAIA Activity Demo (edited)' } });
+    check(
+      'edit_page rewrites text on the demo page',
+      !!ep && ep.ok && typeof ep.after === 'string',
+      JSON.stringify(ep && (ep.error || { tag: ep.tag, before: ep.before, after: ep.after }))
     );
 
     // 11h. chatbot responds (mock) about the page

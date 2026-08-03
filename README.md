@@ -51,17 +51,17 @@ computer use / browser-use) — fully offline via the `mock` provider:
 - Privacy: actions are executed on the real page, but keystrokes typed by the
   agent still go through the same masking/redaction rules as the user's
 
-### Agent abilities (56 skills) + chatbot
-The agent exposes **56 well-defined abilities** — each one a named skill you can
+### Agent abilities (73 skills) + chatbot
+The agent exposes **73 well-defined abilities** — each one a named skill you can
 invoke from the popup's **Agent abilities** browser or trigger from the
 **Chatbot** in plain English. Grouped by category:
 
 | Category | Skills |
 | --- | --- |
-| **read** (page intelligence) | DOM snapshot, read page text, list links, extract tables, inspect forms, page outline, find contacts & data, page metadata, accessibility audit, page health check, find element, summarize page, element state, readable article extraction, read clipboard, session log |
-| **write** (computer use) | click element, type text, clear field, select dropdown option, check/uncheck checkbox, scroll page, navigate to URL, submit form, **fill form** (auto-generates test data or uses your values; never touches sensitive fields), hover, double-click, right-click, key press, drag, focus, write clipboard, wait seconds, wait for element, list/open/switch/close tabs |
-| **agent** (composed) | **chat** (multi-turn chatbot that sees the tab), describe screen, run a task, plan a task, deep page report, audit forms, end-to-end **UI validate** (scripted click/type/check flows), **visual check** (before/after pixel diff against a stored baseline), **deep research** (plan → search → cited report; live web search with a provider, offline otherwise), background task status/cancel (run with `async: true`, poll with `task_status`), MCP **connect/tools/call** (Streamable HTTP servers, like Claude Desktop / Gemini) |
-| **meta** | take screenshot, viewport info, list abilities, resize window |
+| **read** (page intelligence) | DOM snapshot, read page text, list links, extract tables, inspect forms, page outline, find contacts & data, page metadata, accessibility audit, page health check, find element, summarize page, element state, readable article extraction, read clipboard, session log, current time |
+| **write** (computer use) | click element, type text, clear field, select dropdown option, check/uncheck checkbox, scroll page, navigate to URL, submit form, **fill form** (auto-generates test data or uses your values; never touches sensitive fields), hover, double-click, right-click, middle-click, triple-click, mouse button down/up, key press, **hold key** (chords / long-press), drag, focus, write clipboard, **edit page** (find & replace text on the live page), **run JS** (execute a snippet in the page), wait seconds, wait for element, list/open/switch/close tabs, remember/forget, notify, download |
+| **agent** (composed) | **chat** (multi-turn chatbot that sees the tab), describe screen, run a task, plan a task, deep page report, audit forms, end-to-end **UI validate** (scripted click/type/check flows), **visual check** (before/after pixel diff against a stored baseline), **deep research** (plan → search → cited report; live web search with a provider, offline otherwise), background task status/cancel (run with `async: true`, poll with `task_status`), MCP **connect/tools/call** (Streamable HTTP servers, like Claude Desktop / Gemini), **web search** / **web fetch** (Claude Desktop Web Access equivalents), **memory** remember/recall/list/forget (survives across sessions), **schedule task** (run an ability later via alarms, with a notification) |
+| **meta** | take screenshot, **inspect screen region** (crop a screenshot at full resolution), viewport info, list abilities, resize window |
 
 The **chatbot** remembers the conversation per session, sees a live DOM snapshot
 of the current tab (plus a screenshot when a vision key is set), and can point
@@ -102,7 +102,7 @@ To try the agent features offline, open the popup's **Task** card: press
 button"*) and hit Run — with the default `mock` vision provider everything
 works with no API key. The **Chatbot** card answers questions about the tab and
 translates natural language into abilities; the **Agent abilities** card lists
-all 56 skills with their arguments and a Run button. The dashboard's
+all 73 skills with their arguments and a Run button. The dashboard's
 **Agent** tab shows every report, task transcript, chat turn and ability run.
 
 Screenshots of the dashboard and agent runs live in `demo/`.
@@ -166,7 +166,7 @@ content/element-tools.js    DOM attribution, xpath/css fingerprinting, a11y
 content/privacy-scan.js     sensitive-field detection (WeakSet-cached)
 background/service-worker.js orchestrator: routing, sessions, tabs, flushing
 background/agent.js         agentic layer: page reports + computer-use task loop
-background/abilities.js     the 56-skill ability registry + chatbot history
+background/abilities.js     the 73-skill ability registry + chatbot history
 background/capture.js       capture pipeline (offscreen re-encode)
 background/vision.js        6 vision providers + offline mock
 background/insights.js      heuristic detectors + LLM summaries
@@ -185,13 +185,14 @@ HTTP.
 ## Testing
 
 ```bash
-npm test            # 124 unit tests (config, utils, element-tools, session, insights, vision, db, agent, abilities, mcp)
+npm test            # 139 unit tests (config, utils, element-tools, session, insights, vision, db, agent, abilities, mcp)
 npm run test:integration  # live provider checks — skips without keys
 npm run e2e   # loads the real extension in headless Chrome (puppeteer-core +
               #   system Chrome), drives the /demo page, and verifies tracking,
               #   redaction, capture, vision, agent page-reports + task loop,
-              #   the 56-ability registry, form filling, chatbot, deep research,
-              #   tab management, and the full receiver round-trip
+              #   the 73-ability registry, form filling, chatbot, deep research,
+              #   tab management, web search/fetch, memory, run_js, and the
+              #   full receiver round-trip
 ```
 
 The live integration test runs against **Groq** when `GROQ_API_KEY` is set

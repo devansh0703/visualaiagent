@@ -1,5 +1,5 @@
 /**
- * test/unit/abilities.test.mjs — the 56-ability registry (background) and the
+ * test/unit/abilities.test.mjs — the 73-ability registry (background) and the
  * content-side DOM router that backs it.
  */
 import { test } from 'node:test';
@@ -242,6 +242,80 @@ test('clipboard_write / clipboard_read round-trip through navigator.clipboard', 
   assert.equal(read.text, 'hello world');
 });
 
+test('middle_click fires auxclick with button 1', () => {
+  const fx = buildFormFixture();
+  const tools = loadTools(fx.routes);
+  const res = tools.agentAbility('middle_click', { text: 'secondary' });
+  assert.equal(res.ok, true);
+  assert.equal(res.type, 'middle_click');
+  assert.ok(fx.buttons[1]._events.some((e) => e.type === 'auxclick' && e.button === 1));
+});
+
+test('triple_click fires three click sequences plus dblclicks', () => {
+  const fx = buildFormFixture();
+  const tools = loadTools(fx.routes);
+  const res = tools.agentAbility('triple_click', { text: 'secondary' });
+  assert.equal(res.ok, true);
+  const clicks = fx.buttons[1]._events.filter((e) => e.type === 'click').length;
+  assert.equal(clicks, 3);
+  assert.equal(fx.buttons[1]._events.filter((e) => e.type === 'dblclick').length, 2);
+});
+
+test('mouse_button presses and releases a button', () => {
+  const fx = buildFormFixture();
+  const tools = loadTools(fx.routes);
+  const down = tools.agentAbility('mouse_button', { ref: 'el6', button: 'left', state: 'down' });
+  assert.equal(down.ok, true);
+  assert.ok(fx.buttons[1]._events.some((e) => e.type === 'mousedown'));
+  const up = tools.agentAbility('mouse_button', { ref: 'el6', button: 'right', state: 'up' });
+  assert.equal(up.ok, true);
+  assert.ok(fx.buttons[1]._events.some((e) => e.type === 'mouseup' && e.button === 2));
+  const bad = tools.agentAbility('mouse_button', { ref: 'el6', state: 'sideways' });
+  assert.equal(bad.ok, false);
+});
+
+test('hold_key holds keydown for the duration then releases', async () => {
+  const fx = buildFormFixture();
+  const tools = loadTools(fx.routes);
+  const res = await tools.agentAbility('hold_key', { ref: 'f1', key: 'Shift', seconds: 0.01 });
+  assert.equal(res.ok, true);
+  assert.ok(fx.email._events.some((e) => e.type === 'keydown' && e.key === 'Shift'));
+  assert.ok(fx.email._events.some((e) => e.type === 'keyup' && e.key === 'Shift'));
+  assert.ok(res.elapsedMs >= 5);
+});
+
+test('edit_page replaces text on the live page', () => {
+  const h1 = mkEl('h1', { text: 'Old Title' });
+  const tools = loadTools({ 'a,button,input,select,textarea,summary,[contenteditable],h1,h2,h3,h4,h5,h6,p,li,label,span,div,code,blockquote,td,th': [h1] });
+  const res = tools.agentAbility('edit_page', { text: 'old title', value: 'New Title' });
+  assert.equal(res.ok, true);
+  assert.equal(res.tag, 'h1');
+  assert.equal(res.before, 'Old Title');
+  assert.equal(res.after, 'New Title');
+  assert.equal(h1.textContent, 'New Title');
+});
+
+test('edit_page writes through to input values', () => {
+  const fx = buildFormFixture();
+  const tools = loadTools(fx.routes);
+  const res = tools.agentAbility('edit_page', { ref: 'f1', value: 'edited@example.com' });
+  assert.equal(res.ok, true);
+  assert.equal(fx.email.value, 'edited@example.com');
+});
+
+test('run_js executes code in the page and returns the serialized value', () => {
+  const fx = buildFormFixture();
+  const tools = loadTools(fx.routes);
+  const res = tools.agentAbility('run_js', { code: 'return { a: 1, b: [1,2] }' });
+  assert.equal(res.ok, true);
+  assert.equal(res.type, 'object');
+  assert.equal(res.result, '{"a":1,"b":[1,2]}');
+  const scalar = tools.agentAbility('run_js', { code: 'return 40 + 2' });
+  assert.equal(scalar.result, '42');
+  const noop = tools.agentAbility('run_js', { code: '' });
+  assert.equal(noop.ok, false);
+});
+
 /* --------------------------- background registry -------------------------- */
 
 function mockCtx(domImpl) {
@@ -255,9 +329,9 @@ function mockCtx(domImpl) {
   };
 }
 
-test('registry exposes 56 abilities across 4 categories', () => {
+test('registry exposes 73 abilities across 4 categories', () => {
   const list = abilities.listAbilities();
-  assert.equal(list.length, 56);
+  assert.equal(list.length, 73);
   const cats = new Set(list.map((a) => a.category));
   assert.deepEqual([...cats].sort(), ['agent', 'meta', 'read', 'write']);
   assert.ok(list.every((a) => a.id && a.name && a.description && Array.isArray(a.args)));
@@ -349,7 +423,7 @@ test('runAbility rejects unknown abilities with the available list', async () =>
   const res = await abilities.runAbility('nope', ctx, {});
   assert.equal(res.ok, false);
   assert.match(res.error, /unknown ability/);
-  assert.equal(res.available.length, 56);
+  assert.equal(res.available.length, 73);
 });
 
 test('chat history is stored and capped', async () => {
@@ -368,6 +442,7 @@ test('chat history is stored and capped', async () => {
 /* ---------------------- new SOTA abilities (background) ------------------- */
 
 function bgCtx(over) {
+  const memoryMap = {};
   return {
     tabId: 1,
     config: { vision: { provider: 'mock' } },
@@ -382,6 +457,20 @@ function bgCtx(over) {
     taskStatus: () => null,
     reportProgress: async () => {},
     isCancelled: () => false,
+    memory: {
+      get: async (key) => memoryMap[key] || null,
+      list: async () => Object.entries(memoryMap).map(([key, v]) => ({ key, ...v })),
+      set: async (key, value, kind) => {
+        memoryMap[key] = { value, kind: kind || 'note', updatedAt: Date.now() };
+      },
+      remove: async (key) => {
+        delete memoryMap[key];
+      },
+    },
+    notify: async () => true,
+    download: async (d) => 42,
+    schedule: async (s) => ({ id: 'sched1', runsAt: Date.now() + s.delaySec * 1000 }),
+    cropImage: async () => ({ dataUrl: 'data:image/jpeg;base64,AAAA', width: 10, height: 10, region: { x: 0, y: 0, w: 10, h: 10 } }),
     ...over,
   };
 }
@@ -541,5 +630,93 @@ test('task_status and task_cancel operate on the background task store', async (
   assert.equal(cancelled.ok, true);
   assert.equal(task.cancelled, true);
   const missing = await abilities.runAbility('task_status', ctx, { taskId: 'nope' });
+  assert.equal(missing.ok, false);
+});
+
+test('web_search returns synthetic results offline', async () => {
+  const ctx = bgCtx();
+  const res = await abilities.runAbility('web_search', ctx, { query: 'claude desktop' });
+  assert.equal(res.ok, true);
+  assert.equal(res.live, false);
+  assert.ok(res.count >= 1);
+  assert.ok(Array.isArray(res.results) && res.results.length === res.count);
+  assert.ok(res.results.every((r) => r.title && r.url && typeof r.snippet === 'string'));
+  assert.ok(res.results.every((r) => r.synthetic === true));
+  const bad = await abilities.runAbility('web_search', ctx, { query: '   ' });
+  assert.equal(bad.ok, false);
+});
+
+test('web_fetch returns offline placeholder when provider is mock', async () => {
+  const ctx = bgCtx();
+  const res = await abilities.runAbility('web_fetch', ctx, { url: 'https://example.com/doc' });
+  assert.equal(res.ok, true);
+  assert.equal(res.mock, true);
+  assert.match(res.text, /\[offline\]/);
+  assert.equal(res.url, 'https://example.com/doc');
+  const bad = await abilities.runAbility('web_fetch', ctx, { url: 'not a url' });
+  assert.equal(bad.ok, false);
+});
+
+test('memory_remember / memory_recall / memory_list / memory_forget round-trip', async () => {
+  const ctx = bgCtx();
+  const rem = await abilities.runAbility('memory_remember', ctx, { key: 'user-pref', value: 'dark mode', kind: 'preference' });
+  assert.equal(rem.ok, true);
+  assert.equal(rem.key, 'user-pref');
+  const recall = await abilities.runAbility('memory_recall', ctx, { query: 'dark' });
+  assert.equal(recall.ok, true);
+  assert.equal(recall.count, 1);
+  assert.equal(recall.entries[0].value, 'dark mode');
+  const list = await abilities.runAbility('memory_list', ctx, {});
+  assert.equal(list.ok, true);
+  assert.equal(list.count, 1);
+  const forget = await abilities.runAbility('memory_forget', ctx, { key: 'user-pref' });
+  assert.equal(forget.ok, true);
+  const empty = await abilities.runAbility('memory_list', ctx, {});
+  assert.equal(empty.count, 0);
+  const noKey = await abilities.runAbility('memory_remember', ctx, { key: ' ', value: 'x' });
+  assert.equal(noKey.ok, false);
+});
+
+test('current_time returns an ISO timestamp', async () => {
+  const res = await abilities.runAbility('current_time', bgCtx(), {});
+  assert.equal(res.ok, true);
+  assert.match(res.iso, /^\d{4}-\d{2}-\d{2}T/);
+  assert.ok(res.unix > 0);
+});
+
+test('schedule_task schedules a valid ability and rejects unknown ones', async () => {
+  const ctx = bgCtx();
+  const res = await abilities.runAbility('schedule_task', ctx, { ability: 'current_time', inSeconds: 10, note: 'ping' });
+  assert.equal(res.ok, true);
+  assert.equal(res.scheduledAbility, 'current_time');
+  assert.equal(res.taskId, 'sched1');
+  assert.ok(res.runsAt > Date.now());
+  const bad = await abilities.runAbility('schedule_task', ctx, { ability: 'nope', inSeconds: 10 });
+  assert.equal(bad.ok, false);
+});
+
+test('notify surfaces a desktop notification via ctx.notify', async () => {
+  const ok = await abilities.runAbility('notify', bgCtx(), { message: 'hello' });
+  assert.equal(ok.ok, true);
+  const fail = await abilities.runAbility('notify', bgCtx({ notify: async () => false }), { message: 'nope' });
+  assert.equal(fail.ok, false);
+  assert.equal(fail.error, 'chrome.notifications failed');
+});
+
+test('download saves a URL via the downloads manager', async () => {
+  const ok = await abilities.runAbility('download', bgCtx(), { url: 'https://example.com/file.pdf', filename: 'x.pdf' });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.downloadId, 42);
+  const bad = await abilities.runAbility('download', bgCtx(), { url: 'javascript:alert(1)' });
+  assert.equal(bad.ok, false);
+});
+
+test('screen_region crops the screenshot at full resolution', async () => {
+  const ctx = bgCtx({ capture: async () => 'data:image/png;base64,AA' });
+  const res = await abilities.runAbility('screen_region', ctx, { x: 0, y: 0, w: 10, h: 10 });
+  assert.equal(res.ok, true);
+  assert.equal(res.region.w, 10);
+  assert.equal(res.width, 10);
+  const missing = await abilities.runAbility('screen_region', ctx, { x: 0, y: 0, w: 0, h: 10 });
   assert.equal(missing.ok, false);
 });

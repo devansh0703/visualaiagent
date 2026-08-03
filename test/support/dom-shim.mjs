@@ -129,6 +129,10 @@ export function sandboxWith(shims) {
     },
     getComputedStyle: () => ({ visibility: 'visible', display: 'block' }),
     navigator: { clipboard },
+    Function: Function,
+    eval: (s) => (0, eval)(s),
+    setTimeout,
+    clearTimeout,
     console,
   };
   sandbox.globalThis = sandbox;

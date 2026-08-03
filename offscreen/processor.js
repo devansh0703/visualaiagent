@@ -6,6 +6,12 @@
 let busy = false;
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === 'vaia:crop_image') {
+    cropImage(msg)
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ error: String(err) }));
+    return true; // async
+  }
   if (!msg || msg.type !== 'vaia:process_image') return false;
   if (busy) {
     sendResponse({ error: 'busy' });
@@ -20,6 +26,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
   return true; // async
 });
+
+/**
+ * Zoom-style region inspect: crop [x, y, w, h] out of a full screenshot and
+ * return it at native resolution (the computer_20251124 `zoom` equivalent).
+ */
+async function cropImage({ id, dataUrl, x, y, w, h }) {
+  const img = await loadImage(dataUrl);
+  const rx = Math.max(0, Math.min(img.naturalWidth, Number(x) || 0));
+  const ry = Math.max(0, Math.min(img.naturalHeight, Number(y) || 0));
+  const rw = Math.min(img.naturalWidth - rx, Math.max(1, Number(w) || 0));
+  const rh = Math.min(img.naturalHeight - ry, Math.max(1, Number(h) || 0));
+  const canvas = document.createElement('canvas');
+  canvas.width = rw;
+  canvas.height = rh;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, rx, ry, rw, rh, 0, 0, rw, rh);
+  return { id, dataUrl: canvas.toDataURL('image/jpeg', 90), width: rw, height: rh, region: { x: rx, y: ry, w: rw, h: rh }, mime: 'image/jpeg' };
+}
 
 async function processImage({ id, dataUrl, maxWidth, quality }) {
   const img = await loadImage(dataUrl);

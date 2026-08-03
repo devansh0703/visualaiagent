@@ -1,5 +1,5 @@
 /**
- * abilities.js — the agent's 30 well-defined skills.
+ * abilities.js — the agent's 73 well-defined skills.
  *
  * Each ability is a named, self-contained capability the user can invoke from
  * the popup chatbot / abilities browser. Abilities are grouped:
@@ -309,6 +309,101 @@ def({
   },
 });
 
+def({
+  id: 'web_fetch',
+  name: 'Fetch URL',
+  category: 'read',
+  description: 'Fetch a URL and return its title + readable text (browser equivalent of Claude Desktop Web Fetch). Offline returns a synthetic summary.',
+  args: [{ name: 'url', type: 'string', required: true, desc: 'full http(s) URL' }],
+  run: async (ctx, a) => {
+    const url = String(a.url || '').trim();
+    if (!/^https?:\/\//.test(url)) return { ok: false, error: 'web_fetch needs an http(s) URL' };
+    if (ctx.isMock()) {
+      return { ok: true, url, mock: true, live: false, title: '', text: `[offline] fetched ${url} — real fetch requires a configured environment.`, chars: 24 };
+    }
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) return { ok: false, error: 'web_fetch HTTP ' + res.status, url };
+      const html = await res.text();
+      const title = (html.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1] || '';
+      const text = stripHtmlForRead(html).slice(0, 12000);
+      return { ok: true, url, status: res.status, title: String(title).trim().slice(0, 200), live: true, chars: text.length, text };
+    } catch (e) {
+      return { ok: false, error: 'web_fetch failed: ' + (e && e.message ? e.message : e), url };
+    }
+  },
+});
+
+function stripHtmlForRead(s) {
+  return String(s || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+def({
+  id: 'memory_recall',
+  name: 'Recall memory',
+  category: 'read',
+  description: 'Recall facts the agent remembered in earlier sessions (browser equivalent of the Claude memory tool). Returns entries matching a key or substring.',
+  args: [{ name: 'query', type: 'string', required: false, desc: 'exact key or text to search for' }],
+  run: async (ctx, a) => {
+    if (!ctx.memory) return { ok: false, error: 'memory store unavailable' };
+    const all = await ctx.memory.list();
+    const q = String(a.query || '').trim().toLowerCase();
+    const matches = q
+      ? all.filter((m) => m.key.toLowerCase().includes(q) || String(m.value || '').toLowerCase().includes(q))
+      : all;
+    const out = matches.map((m) => ({ key: m.key, kind: m.kind || 'note', value: String(m.value || '').slice(0, 500), updatedAt: m.updatedAt }));
+    return { ok: true, summary: `${out.length} memory entr${out.length === 1 ? 'y' : 'ies'}` + (q ? ` matching "${a.query}"` : ''), count: out.length, total: all.length, entries: out.slice(0, 50) };
+  },
+});
+
+def({
+  id: 'memory_list',
+  name: 'List memory',
+  category: 'read',
+  description: 'List every stored memory key with a snippet of its value.',
+  run: async (ctx) => {
+    if (!ctx.memory) return { ok: false, error: 'memory store unavailable' };
+    const all = await ctx.memory.list();
+    const out = all.map((m) => ({ key: m.key, kind: m.kind || 'note', snippet: String(m.value || '').slice(0, 80), updatedAt: m.updatedAt }));
+    return { ok: true, summary: `${out.length} memory entr${out.length === 1 ? 'y' : 'ies'}`, count: out.length, entries: out };
+  },
+});
+
+def({
+  id: 'current_time',
+  name: 'Current time',
+  category: 'read',
+  description: 'Current date/time and timezone (the browser\'s system clock).',
+  run: () => {
+    const d = new Date();
+    let tz = '';
+    try {
+      tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {}
+    return {
+      ok: true,
+      iso: d.toISOString(),
+      unix: Math.floor(d.getTime() / 1000),
+      date: d.toDateString(),
+      time: d.toTimeString().slice(0, 8),
+      day: d.toLocaleDateString(undefined, { weekday: 'long' }),
+      timezone: tz,
+      summary: `${d.toDateString()} ${d.toTimeString().slice(0, 8)} ${tz}`.trim(),
+    };
+  },
+});
+
 /* ------------------------------ write ------------------------------------ */
 
 def({
@@ -476,6 +571,57 @@ def({
 });
 
 def({
+  id: 'middle_click',
+  name: 'Middle click',
+  category: 'write',
+  description: 'Middle-click an element (auxclick with button 1) — open-in-new-tab gesture.',
+  args: [
+    { name: 'ref', type: 'string', required: false, desc: 'elN or fN ref' },
+    { name: 'text', type: 'string', required: false, desc: 'or match by label text' },
+  ],
+  run: (ctx, a) => ctx.dom('middle_click', { ref: a.ref, text: a.text }),
+});
+
+def({
+  id: 'triple_click',
+  name: 'Triple click',
+  category: 'write',
+  description: 'Triple-click an element (selects paragraphs / rows in some UIs).',
+  args: [
+    { name: 'ref', type: 'string', required: false, desc: 'elN or fN ref' },
+    { name: 'text', type: 'string', required: false, desc: 'or match by label text' },
+  ],
+  run: (ctx, a) => ctx.dom('triple_click', { ref: a.ref, text: a.text }),
+});
+
+def({
+  id: 'mouse_button',
+  name: 'Mouse button press/release',
+  category: 'write',
+  description: 'Fine-grained mouse control: press or release a button without moving the cursor.',
+  args: [
+    { name: 'ref', type: 'string', required: false, desc: 'elN or fN ref' },
+    { name: 'text', type: 'string', required: false, desc: 'or match by label text' },
+    { name: 'button', type: 'string', required: false, desc: 'left | middle | right (default left)' },
+    { name: 'state', type: 'string', required: true, desc: 'down (press) or up (release)' },
+  ],
+  run: (ctx, a) => ctx.dom('mouse_button', { ref: a.ref, text: a.text, button: a.button, state: a.state }),
+});
+
+def({
+  id: 'hold_key',
+  name: 'Hold key',
+  category: 'write',
+  description: 'Press and hold a key for N seconds, then release (keyboard chords / long-press).',
+  args: [
+    { name: 'key', type: 'string', required: true, desc: 'key name, e.g. Shift, ArrowDown' },
+    { name: 'seconds', type: 'number', required: false, desc: 'hold duration (default 1, max 10)' },
+    { name: 'ref', type: 'string', required: false, desc: 'optional target ref' },
+  ],
+  run: (ctx, a) => ctx.dom('hold_key', { key: a.key, seconds: a.seconds, ref: a.ref }),
+});
+
+def({
   id: 'key_press',
   name: 'Press keyboard key',
   category: 'write',
@@ -523,6 +669,114 @@ def({
   description: 'Copy text to the clipboard.',
   args: [{ name: 'text', type: 'string', required: true, desc: 'text to copy' }],
   run: (ctx, a) => ctx.dom('clipboard_write', { text: a.text }),
+});
+
+def({
+  id: 'edit_page',
+  name: 'Edit page text',
+  category: 'write',
+  description: 'Edit text on the live page (browser equivalent of the Claude text-editor tool): find an element by text/ref and replace its value or content.',
+  args: [
+    { name: 'ref', type: 'string', required: false, desc: 'elN or fN ref' },
+    { name: 'text', type: 'string', required: false, desc: 'or find an element whose text matches' },
+    { name: 'value', type: 'string', required: true, desc: 'replacement text' },
+  ],
+  run: (ctx, a) => ctx.dom('edit_page', { ref: a.ref, text: a.text, value: a.value }),
+});
+
+def({
+  id: 'run_js',
+  name: 'Run JavaScript',
+  category: 'write',
+  description: 'Execute a snippet of JavaScript in the page and return its value (browser equivalent of the bash tool).',
+  args: [{ name: 'code', type: 'string', required: true, desc: 'JS to evaluate in the page' }],
+  run: async (ctx, a) => {
+    const code = String(a.code || a.script || '').trim();
+    if (!code) return { ok: false, error: 'run_js needs code' };
+    if (ctx.runJs) {
+      const r = await ctx.runJs(code);
+      if (r && r.ok) return r;
+      if (r && r.error) return r;
+    }
+    return ctx.dom('run_js', { code });
+  },
+});
+
+def({
+  id: 'memory_remember',
+  name: 'Remember',
+  category: 'write',
+  description: 'Store a fact in persistent memory that survives across sessions (browser equivalent of the Claude memory tool).',
+  args: [
+    { name: 'key', type: 'string', required: true, desc: 'memory key, e.g. "user-preference"' },
+    { name: 'value', type: 'string', required: true, desc: 'what to remember' },
+    { name: 'kind', type: 'string', required: false, desc: 'note | preference | fact (default note)' },
+  ],
+  run: async (ctx, a) => {
+    if (!ctx.memory) return { ok: false, error: 'memory store unavailable' };
+    const key = String(a.key || '').trim();
+    if (!key) return { ok: false, error: 'memory_remember needs a key' };
+    const value = String(a.value == null ? '' : a.value).trim();
+    if (!value) return { ok: false, error: 'memory_remember needs a value' };
+    const kind = String(a.kind || 'note');
+    await ctx.memory.set(key, value.slice(0, 2000), kind);
+    return { ok: true, summary: `remembered "${key}"`, key, kind, chars: value.length };
+  },
+});
+
+def({
+  id: 'memory_forget',
+  name: 'Forget',
+  category: 'write',
+  description: 'Delete a memory entry by key.',
+  args: [{ name: 'key', type: 'string', required: true, desc: 'memory key to delete' }],
+  run: async (ctx, a) => {
+    if (!ctx.memory) return { ok: false, error: 'memory store unavailable' };
+    const key = String(a.key || '').trim();
+    if (!key) return { ok: false, error: 'memory_forget needs a key' };
+    await ctx.memory.remove(key);
+    return { ok: true, summary: `forgot "${key}"`, key };
+  },
+});
+
+def({
+  id: 'notify',
+  name: 'Notify',
+  category: 'write',
+  description: 'Show a desktop notification.',
+  args: [
+    { name: 'message', type: 'string', required: true, desc: 'notification body' },
+    { name: 'title', type: 'string', required: false, desc: 'title (default "Visual AI Agent")' },
+  ],
+  run: async (ctx, a) => {
+    if (!ctx.notify) return { ok: false, error: 'notifications unavailable' };
+    const ok = await ctx.notify({ title: a.title, message: a.message });
+    return ok
+      ? { ok: true, summary: 'notification sent' }
+      : { ok: false, error: 'chrome.notifications failed' };
+  },
+});
+
+def({
+  id: 'download',
+  name: 'Download',
+  category: 'write',
+  description: 'Save a URL or file to disk via the browser downloads manager.',
+  args: [
+    { name: 'url', type: 'string', required: true, desc: 'URL to download' },
+    { name: 'filename', type: 'string', required: false, desc: 'suggested filename/path' },
+  ],
+  run: async (ctx, a) => {
+    if (!ctx.download) return { ok: false, error: 'downloads unavailable' };
+    const url = String(a.url || '').trim();
+    if (!/^https?:/i.test(url) && !/^data:/i.test(url)) return { ok: false, error: 'download needs an http(s) or data: URL' };
+    try {
+      const id = await ctx.download({ url, filename: a.filename });
+      return { ok: true, summary: `downloading ${String(url).slice(0, 60)}`, downloadId: id, url };
+    } catch (e) {
+      return { ok: false, error: 'download failed: ' + (e && e.message ? e.message : e) };
+    }
+  },
 });
 
 /* ---- waiting / observation (self-correction loop) ------------------------ */
@@ -999,6 +1253,88 @@ def({
     t.cancelled = true;
     t.status = 'cancelling';
     return { ok: true, summary: `cancellation requested for task ${id.slice(0, 8)}`, taskId: id, status: 'cancelling' };
+  },
+});
+
+/* ---- web search / region inspect / scheduled tasks (Desktop equivalents) - */
+
+def({
+  id: 'web_search',
+  name: 'Web search',
+  category: 'agent',
+  description: 'Ranked web results for a query (browser equivalent of Claude Desktop Web Search). Live results with a real provider + research opt-in, offline otherwise.',
+  args: [
+    { name: 'query', type: 'string', required: true, desc: 'search query' },
+    { name: 'max', type: 'number', required: false, desc: 'max results 1-8 (default 5)' },
+  ],
+  run: async (ctx, a) => {
+    const q = String(a.query || a.text || '').trim();
+    if (!q) return { ok: false, error: 'web_search needs a query' };
+    const live = !ctx.isMock() && !!ctx.config && ctx.config.research && ctx.config.research.enabled !== false;
+    const res = await webSearch(q, { maxResults: Math.min(8, Number(a.max) || 5), live });
+    return {
+      ok: true,
+      query: q,
+      live: res.live,
+      count: res.sources.length,
+      results: res.sources.map((s) => ({ title: s.title, url: s.url, snippet: String(s.snippet || '').slice(0, 200), synthetic: !!s.synthetic })),
+    };
+  },
+});
+
+def({
+  id: 'screen_region',
+  name: 'Inspect screen region',
+  category: 'agent',
+  description: 'Capture the tab and crop a region at full resolution (browser equivalent of the computer-use zoom action) for closer inspection.',
+  args: [
+    { name: 'x', type: 'number', required: true, desc: 'top-left x' },
+    { name: 'y', type: 'number', required: true, desc: 'top-left y' },
+    { name: 'w', type: 'number', required: true, desc: 'region width' },
+    { name: 'h', type: 'number', required: true, desc: 'region height' },
+  ],
+  run: async (ctx, a) => {
+    const x = Number(a.x);
+    const y = Number(a.y);
+    const w = Number(a.w);
+    const h = Number(a.h);
+    if (!(w > 0) || !(h > 0)) return { ok: false, error: 'screen_region needs positive w/h' };
+    const dataUrl = await ctx.capture();
+    if (!dataUrl) return { ok: false, error: 'screen_region needs a screenshot (capture failed)' };
+    if (!ctx.cropImage) return { ok: false, error: 'image cropping unavailable in this environment' };
+    const crop = await ctx.cropImage({ dataUrl, x, y, w, h });
+    if (!crop) return { ok: true, available: false, note: 'region decode unavailable here', region: { x, y, w, h } };
+    return { ok: true, region: crop.region, width: crop.width, height: crop.height, dataUrl: crop.dataUrl };
+  },
+});
+
+def({
+  id: 'schedule_task',
+  name: 'Schedule task',
+  category: 'agent',
+  description: 'Run an ability once after a delay (browser equivalent of Claude Desktop scheduled tasks). Uses browser alarms; notifies when it runs.',
+  args: [
+    { name: 'ability', type: 'string', required: true, desc: 'ability id to run' },
+    { name: 'inSeconds', type: 'number', required: true, desc: 'delay in seconds (min 10)' },
+    { name: 'args', type: 'json', required: false, desc: 'args to pass to the ability' },
+    { name: 'note', type: 'string', required: false, desc: 'optional note' },
+  ],
+  run: async (ctx, a) => {
+    if (!ctx.schedule) return { ok: false, error: 'scheduling unavailable' };
+    const ability = String(a.ability || '').trim();
+    if (!ability || !BY_ID.has(ability)) {
+      return { ok: false, error: 'schedule_task needs a valid ability id', available: BY_ID.has('ability_list') ? listAbilities().map((x) => x.id) : [] };
+    }
+    const delaySec = Math.max(10, Number(a.inSeconds) || 60);
+    const s = await ctx.schedule({ ability, args: a.args || {}, note: a.note, delaySec });
+    return {
+      ok: true,
+      summary: `${ability} scheduled in ${delaySec}s${a.note ? ' — ' + a.note : ''}`,
+      taskId: s.id,
+      scheduledAbility: ability,
+      runsAt: s.runsAt,
+      runsInSec: Math.max(0, Math.round((s.runsAt - Date.now()) / 1000)),
+    };
   },
 });
 

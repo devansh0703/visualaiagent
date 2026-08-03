@@ -469,6 +469,12 @@ function formatAbilityResult(res) {
   if (res.events && res.events.length) lines.push(res.events.slice(0, 10).map((e) => `  ${e.type} ${e.url}`).join('\n'));
   if (res.diffScore != null) lines.push(`diff ${Math.round(res.diffScore * 100)}%`);
   if (res.reply) lines.push(res.reply);
+  if (res.text) lines.push(res.mock ? String(res.text) : String(res.text).slice(0, 800));
+  if (Array.isArray(res.entries) && res.entries.length) {
+    lines.push(`memory (${res.entries.length}):`);
+    for (const e of res.entries.slice(0, 10)) lines.push(`  [${e.kind || 'note'}] ${e.key}: ${String(e.value).slice(0, 80)}`);
+  }
+  if (res.result != null && typeof res.result === 'string' && !res.report) lines.push(res.result.slice(0, 800));
   if (res.abilities) lines.push(`${res.count} abilities available`);
   if (res.count != null && !res.abilities && !lines.length) lines.push(`${res.count} result(s)`);
   if (res.model) lines.push('\n(' + (res.provider || '') + ' · ' + res.model + ')');
