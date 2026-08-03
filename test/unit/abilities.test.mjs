@@ -1,5 +1,5 @@
 /**
- * test/unit/abilities.test.mjs — the 30-ability registry (background) and the
+ * test/unit/abilities.test.mjs — the 56-ability registry (background) and the
  * content-side DOM router that backs it.
  */
 import { test } from 'node:test';
@@ -175,6 +175,73 @@ test('agentAbility rejects unknown abilities', () => {
   assert.ok(Array.isArray(res.available));
 });
 
+test('hover / double_click / right_click / focus fire the right events on the target', () => {
+  const fx = buildFormFixture();
+  const tools = loadTools(fx.routes);
+  const btn = fx.buttons[1];
+  assert.equal(tools.agentAbility('hover', { text: 'secondary' }).ok, true);
+  assert.ok(btn._events.some((e) => e.type === 'mouseover'));
+  assert.equal(tools.agentAbility('double_click', { text: 'secondary' }).ok, true);
+  assert.ok(btn._events.some((e) => e.type === 'dblclick'));
+  assert.equal(tools.agentAbility('right_click', { text: 'secondary' }).ok, true);
+  assert.ok(btn._events.some((e) => e.type === 'contextmenu' && e.button === 2));
+  assert.equal(tools.agentAbility('focus', { text: 'secondary' }).ok, true);
+  assert.ok(btn._events.some((e) => e.type === 'focusin'));
+});
+
+test('key_press sends keydown/keypress/keyup to the ref target', () => {
+  const fx = buildFormFixture();
+  const tools = loadTools(fx.routes);
+  const res = tools.agentAbility('key_press', { ref: 'f1', key: 'Enter' });
+  assert.equal(res.ok, true);
+  assert.ok(fx.email._events.some((e) => e.type === 'keydown' && e.key === 'Enter'));
+  assert.ok(fx.email._events.some((e) => e.type === 'keyup' && e.key === 'Enter'));
+});
+
+test('drag_element dispatches pointer/mouse sequence from the source ref', () => {
+  const fx = buildFormFixture();
+  const tools = loadTools(fx.routes);
+  const res = tools.agentAbility('drag', { ref: 'el6', dx: 50, dy: 30 });
+  assert.equal(res.ok, true);
+  assert.equal(res.dx, 50);
+  assert.equal(res.dy, 30);
+  assert.ok(fx.buttons[1]._events.some((e) => e.type === 'pointerdown'));
+  assert.ok(fx.buttons[1]._events.some((e) => e.type === 'pointerup'));
+});
+
+test('element_state reports visibility, tag and rect for a ref', () => {
+  const fx = buildFormFixture();
+  const tools = loadTools(fx.routes);
+  const res = tools.agentAbility('element_state', { ref: 'el6' });
+  assert.equal(res.ok, true);
+  assert.equal(res.tag, 'button');
+  assert.equal(res.visible, true);
+  assert.equal(res.text, 'Secondary');
+  assert.ok(res.rect && res.rect.w > 0);
+});
+
+test('readable extracts the article content into plain text', () => {
+  const p1 = mkEl('p', { text: 'First paragraph text.' });
+  const p2 = mkEl('p', { text: 'Second paragraph text.' });
+  const article = mkEl('article', { querySelectorAll: (sel) => (sel.includes('p') ? [p1, p2] : []) });
+  const tools = loadTools({ article: [article], 'p,h1,h2,h3,h4,h5,h6,li,blockquote,pre': [p1, p2] });
+  const res = tools.agentAbility('readable', {});
+  assert.equal(res.ok, true);
+  assert.equal(res.wordCount, 6);
+  assert.match(res.text, /First paragraph text\./);
+});
+
+test('clipboard_write / clipboard_read round-trip through navigator.clipboard', async () => {
+  const fx = buildFormFixture();
+  const tools = loadTools(fx.routes);
+  const wrote = await tools.agentAbility('clipboard_write', { text: 'hello world' });
+  assert.equal(wrote.ok, true);
+  assert.equal(wrote.source, 'clipboard-api');
+  const read = await tools.agentAbility('clipboard_read', {});
+  assert.equal(read.ok, true);
+  assert.equal(read.text, 'hello world');
+});
+
 /* --------------------------- background registry -------------------------- */
 
 function mockCtx(domImpl) {
@@ -188,9 +255,9 @@ function mockCtx(domImpl) {
   };
 }
 
-test('registry exposes 30 abilities across 4 categories', () => {
+test('registry exposes 56 abilities across 4 categories', () => {
   const list = abilities.listAbilities();
-  assert.equal(list.length, 30);
+  assert.equal(list.length, 56);
   const cats = new Set(list.map((a) => a.category));
   assert.deepEqual([...cats].sort(), ['agent', 'meta', 'read', 'write']);
   assert.ok(list.every((a) => a.id && a.name && a.description && Array.isArray(a.args)));
@@ -282,7 +349,7 @@ test('runAbility rejects unknown abilities with the available list', async () =>
   const res = await abilities.runAbility('nope', ctx, {});
   assert.equal(res.ok, false);
   assert.match(res.error, /unknown ability/);
-  assert.equal(res.available.length, 30);
+  assert.equal(res.available.length, 56);
 });
 
 test('chat history is stored and capped', async () => {
@@ -296,4 +363,183 @@ test('chat history is stored and capped', async () => {
   assert.equal(h[0].role, 'user');
   assert.equal(h[h.length - 1].role, 'assistant');
   assert.equal(h[h.length - 1].content.length > 0, true);
+});
+
+/* ---------------------- new SOTA abilities (background) ------------------- */
+
+function bgCtx(over) {
+  return {
+    tabId: 1,
+    config: { vision: { provider: 'mock' } },
+    session: { id: 's1' },
+    isMock: () => true,
+    dom: async (ability, args) => ({ ok: true }),
+    capture: async () => null,
+    tabs: null,
+    windows: null,
+    queryEvents: async () => [],
+    queryInsights: async () => [],
+    taskStatus: () => null,
+    reportProgress: async () => {},
+    isCancelled: () => false,
+    ...over,
+  };
+}
+
+test('session_log aggregates tracked events and agent insights', async () => {
+  const ctx = bgCtx({
+    queryEvents: async () => [{ ts: 1, type: 'click', url: 'https://a.com/x' }],
+    queryInsights: async () => [{ ts: 2, type: 'error', title: 'boom' }],
+  });
+  const res = await abilities.runAbility('session_log', ctx, {});
+  assert.equal(res.ok, true);
+  assert.equal(res.eventCount, 1);
+  assert.equal(res.insightCount, 1);
+  assert.equal(res.events[0].type, 'click');
+  assert.equal(res.insights[0].title, 'boom');
+});
+
+test('wait_seconds pauses for a tiny fraction offline', async () => {
+  const res = await abilities.runAbility('wait_seconds', bgCtx(), { seconds: 0.01 });
+  assert.equal(res.ok, true);
+  assert.ok(res.waitedSec >= 0.01);
+});
+
+test('wait_for_element polls until the element appears', async () => {
+  let calls = 0;
+  const ctx = bgCtx({
+    dom: async (ability) => {
+      if (ability === 'find_element') {
+        calls++;
+        return calls >= 3 ? { ok: true, count: 1, matches: [{ ref: 'el1' }] } : { ok: false, count: 0, matches: [] };
+      }
+      return { ok: true };
+    },
+  });
+  const res = await abilities.runAbility('wait_for_element', ctx, { text: 'spinner', timeoutSec: 2 });
+  assert.equal(res.ok, true);
+  assert.equal(res.count, 1);
+  assert.ok(calls >= 3);
+});
+
+test('tab abilities list, open, switch and close tabs', async () => {
+  const tabs = [];
+  const ctx = bgCtx({
+    tabs: {
+      query: async () => tabs,
+      create: async ({ url, active }) => {
+        const t = { id: 100 + tabs.length, url, active: !!active, pinned: false, windowId: 1, title: 'Tab ' + (tabs.length + 1) };
+        tabs.push(t);
+        return t;
+      },
+      update: async (id, patch) => Object.assign(tabs.find((t) => t.id === id), patch),
+      get: async (id) => tabs.find((t) => t.id === id),
+      remove: async (id) => {
+        const i = tabs.findIndex((t) => t.id === id);
+        if (i >= 0) tabs.splice(i, 1);
+      },
+    },
+  });
+  const opened = await abilities.runAbility('tab_open', ctx, { url: 'https://example.com' });
+  assert.equal(opened.ok, true);
+  assert.equal(opened.tabId, 100);
+  const list = await abilities.runAbility('tabs_list', ctx, {});
+  assert.equal(list.ok, true);
+  assert.equal(list.count, 1);
+  assert.equal(list.tabs[0].url, 'https://example.com');
+  const switched = await abilities.runAbility('tab_switch', ctx, { index: 0 });
+  assert.equal(switched.ok, true);
+  assert.equal(switched.tabId, 100);
+  const closed = await abilities.runAbility('tab_close', ctx, { index: 0 });
+  assert.equal(closed.ok, true);
+  assert.equal(tabs.length, 0);
+});
+
+test('viewport_set resizes the focused window', async () => {
+  let updated = null;
+  const ctx = bgCtx({
+    windows: {
+      getLastFocused: async () => ({ id: 7 }),
+      update: async (id, opts) => {
+        updated = { id, ...opts };
+        return { id, ...opts };
+      },
+    },
+  });
+  const res = await abilities.runAbility('viewport_set', ctx, { width: 1280, height: 900 });
+  assert.equal(res.ok, true);
+  assert.equal(res.width, 1280);
+  assert.equal(updated.width, 1280);
+});
+
+test('ui_validate runs steps and stops on the first failure (failFast)', async () => {
+  const calls = [];
+  const ctx = bgCtx({
+    dom: async (ability, args) => {
+      calls.push([ability, args]);
+      if (ability === 'click') return { ok: true };
+      if (ability === 'type') return { ok: false, error: 'no field' };
+      if (ability === 'element_state') return { ok: true };
+      return { ok: true };
+    },
+  });
+  const res = await abilities.runAbility('ui_validate', ctx, {
+    steps: [
+      { action: 'click', ref: 'el1' },
+      { action: 'type', ref: 'f1', value: 'x' },
+      { action: 'check', text: 'y' },
+    ],
+  });
+  assert.equal(res.ok, false);
+  assert.equal(res.passed, 1);
+  assert.equal(res.failed, 1);
+  assert.equal(res.steps.length, 2);
+  assert.equal(res.steps[1].ok, false);
+});
+
+test('ui_validate reports success when every step passes', async () => {
+  const ctx = bgCtx({ dom: async () => ({ ok: true }) });
+  const res = await abilities.runAbility('ui_validate', ctx, {
+    steps: [
+      { action: 'click', ref: 'el1' },
+      { action: 'type', ref: 'f1', value: 'x' },
+      { action: 'check', ref: 'f1' },
+      { action: 'wait', ms: 0 },
+    ],
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.passed, 4);
+  assert.equal(res.failed, 0);
+});
+
+test('deep_research produces a cited report offline (synthetic sources)', async () => {
+  const res = await abilities.runAbility('deep_research', bgCtx(), { topic: 'visual ai agents', depth: 2 });
+  assert.equal(res.ok, true);
+  assert.equal(res.provider, 'mock');
+  assert.equal(res.live, false);
+  assert.ok(res.report && res.report.length > 20);
+  assert.ok(Array.isArray(res.sources) && res.sources.length > 0);
+  assert.ok(res.sources.every((s) => s.synthetic));
+  assert.ok(res.citations >= 1);
+});
+
+test('visual_check degrades gracefully when no image decoder exists', async () => {
+  const ctx = bgCtx({ capture: async () => 'data:image/png;base64,AAAA' });
+  const first = await abilities.runAbility('visual_check', ctx, {});
+  assert.equal(first.ok, true);
+  assert.equal(first.available, false);
+});
+
+test('task_status and task_cancel operate on the background task store', async () => {
+  const task = { id: 't1', status: 'running', ability: 'deep_research', progress: { stage: 'searching', pct: 40 } };
+  const ctx = bgCtx({ taskStatus: (id) => (id === 't1' ? task : null) });
+  const st = await abilities.runAbility('task_status', ctx, { taskId: 't1' });
+  assert.equal(st.ok, true);
+  assert.equal(st.status, 'running');
+  assert.equal(st.stage, 'searching');
+  const cancelled = await abilities.runAbility('task_cancel', ctx, { taskId: 't1' });
+  assert.equal(cancelled.ok, true);
+  assert.equal(task.cancelled, true);
+  const missing = await abilities.runAbility('task_status', ctx, { taskId: 'nope' });
+  assert.equal(missing.ok, false);
 });

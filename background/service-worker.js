@@ -378,11 +378,19 @@ async function runTask(tabId, task, opts) {
 }
 
 // ---------------------------------------------------------------------------
-// Agent abilities (the 30-skill registry in abilities.js)
+// Agent abilities (the skill registry in abilities.js)
 // ---------------------------------------------------------------------------
+const bgTasks = new Map(); // taskId -> { id, ability, args, status, progress, error, cancelled }
+
+async function queryInsights(opts) {
+  const out = [];
+  await idb.each('insights', { index: 'ts', direction: 'prev', limit: opts && opts.limit ? opts.limit : 30, onEach: (r) => out.push(r) });
+  return out;
+}
+
 function buildAbilityContext(tabId) {
   const cfg = getConfig();
-  return {
+  const ctx = {
     tabId,
     config: cfg,
     session,
@@ -403,7 +411,26 @@ function buildAbilityContext(tabId) {
         return null;
       }
     },
+    tabs: chrome.tabs,
+    windows: chrome.windows,
+    queryEvents: async (opts) => (await queryEvents(opts || {})) || [],
+    queryInsights: async (opts) => queryInsights(opts),
+    taskStatus: (id) => bgTasks.get(id) || null,
+    taskId: null,
+    reportProgress: (p) => {
+      const t = bgTasks.get(ctx.taskId);
+      if (t) {
+        t.status = (p && p.status) || t.status;
+        t.progress = p || null;
+        t.updatedAt = now();
+      }
+    },
+    isCancelled: () => {
+      const t = bgTasks.get(ctx.taskId);
+      return !!(t && t.cancelled);
+    },
   };
+  return ctx;
 }
 
 /** Redact values that may be sensitive before persisting an ability run. */
@@ -443,7 +470,7 @@ async function persistAbilityRun(ability, args, result) {
     id: uuid(),
     ts: now(),
     kind: 'agent',
-    type: 'agent_ability',
+    type: ability === 'deep_research' ? 'research_report' : 'agent_ability',
     title: `Ability: ${result.name || ability}`,
     body,
     signal: ok ? 'neutral' : 'negative',
@@ -466,6 +493,20 @@ async function persistAbilityRun(ability, args, result) {
         count: result.count,
         description: result.description,
         summary: result.summary,
+        report: result.report,
+        sources: result.sources,
+        citations: result.citations,
+        live: result.live,
+        passed: result.passed,
+        failed: result.failed,
+        tools: result.tools,
+        toolCount: result.toolCount,
+        content: result.content,
+        tabs: result.tabs,
+        events: result.events,
+        insights: result.insights,
+        diffScore: result.diffScore,
+        changed: result.changed,
       },
       url: result.url || (result.context && result.context.url) || '',
     },
@@ -481,6 +522,36 @@ async function runAbilityInTab(ability, args) {
   const t = tabs && tabs[0];
   const tabId = t ? t.id : session.tabId;
   const ctx = buildAbilityContext(tabId);
+  const async = !!(args && args.async);
+  if (async && ['task_run', 'deep_research', 'ui_validate'].includes(ability)) {
+    const taskId = uuid();
+    bgTasks.set(taskId, { id: taskId, ability, args, status: 'running', createdAt: now(), updatedAt: now(), progress: null, cancelled: false, error: '' });
+    ctx.taskId = taskId;
+    (async () => {
+      try {
+        const result = await abilities.runAbility(ability, ctx, args || {});
+        const rec = bgTasks.get(taskId);
+        if (rec) {
+          rec.status = result.ok ? 'done' : 'error';
+          rec.error = result.error || '';
+          rec.progress = { stage: 'done', pct: 100 };
+        }
+        await persistAbilityRun(ability, args || {}, result);
+      } catch (e) {
+        const rec = bgTasks.get(taskId);
+        if (rec) {
+          rec.status = 'error';
+          rec.error = e && e.message ? e.message : String(e);
+        }
+        captureLog('error', 'async ability failed: ' + ((e && e.message) || e));
+      } finally {
+        const rec = bgTasks.get(taskId);
+        if (rec) rec.updatedAt = now();
+        setTimeout(() => bgTasks.delete(taskId), 10 * 60 * 1000);
+      }
+    })();
+    return { ok: true, async: true, taskId, ability, status: 'running' };
+  }
   const result = await abilities.runAbility(ability, ctx, args || {});
   let rec = null;
   try {

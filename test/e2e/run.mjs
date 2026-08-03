@@ -279,12 +279,12 @@ async function main() {
       JSON.stringify(aIns && aIns.insights && aIns.insights.filter((r) => r.kind === 'agent').map((r) => r.type))
     );
 
-    // 11e. abilities registry responds with 30 skills
+    // 11e. abilities registry responds with 56 skills
     console.log('[e2e] abilities + chatbot + form filling…');
     const alist = await extCall(extPage, { type: 'vaia:list_abilities' });
     check(
-      '30 abilities listed across 4 categories',
-      !!alist && alist.ok && alist.count === 30 && ['read', 'write', 'agent', 'meta'].every((c) => alist.abilities.some((a) => a.category === c)),
+      '56 abilities listed across 4 categories',
+      !!alist && alist.ok && alist.count === 56 && ['read', 'write', 'agent', 'meta'].every((c) => alist.abilities.some((a) => a.category === c)),
       JSON.stringify(alist && { count: alist.count, cats: alist.abilities && [...new Set(alist.abilities.map((a) => a.category))] })
     );
 
@@ -302,6 +302,34 @@ async function main() {
       'fill_form filled the demo form',
       !!ff && ff.ok && ff.filledCount >= 1 && (ff.filled || []).some((x) => x.key === 'q'),
       JSON.stringify(ff && (ff.error || { filled: ff.filled, filledCount: ff.filledCount }))
+    );
+
+    // 11g2. new SOTA abilities round-trip
+    const tlist = await extCall(extPage, { type: 'vaia:run_ability', ability: 'tabs_list' });
+    check(
+      'tabs_list returns open tabs',
+      !!tlist && tlist.ok && tlist.count >= 1 && Array.isArray(tlist.tabs),
+      JSON.stringify(tlist && (tlist.error || tlist.count))
+    );
+    const readable = await extCall(extPage, { type: 'vaia:run_ability', ability: 'page_readable' });
+    check(
+      'page_readable extracts page text',
+      !!readable && readable.ok && readable.wordCount > 0,
+      JSON.stringify(readable && (readable.error || { words: readable.wordCount }))
+    );
+    const dig = await extCall(extPage, { type: 'vaia:run_ability', ability: 'page_digest' });
+    const someRef = dig && dig.elements && dig.elements.length ? dig.elements[0].ref : null;
+    const es = someRef ? await extCall(extPage, { type: 'vaia:run_ability', ability: 'element_state', args: { ref: someRef } }) : null;
+    check(
+      'element_state reports a real element',
+      !!es && es.ok && !!es.tag && es.visible === true,
+      JSON.stringify(es && (es.error || { tag: es.tag, visible: es.visible }))
+    );
+    const dr = await extCall(extPage, { type: 'vaia:run_ability', ability: 'deep_research', args: { topic: 'visual ai agents', depth: 2 } });
+    check(
+      'deep_research returns an offline cited report',
+      !!dr && dr.ok && typeof dr.report === 'string' && dr.report.length > 20 && Array.isArray(dr.sources) && dr.sources.length > 0,
+      JSON.stringify(dr && (dr.error || { reportChars: dr.report && dr.report.length, sources: dr.sources && dr.sources.length }))
     );
 
     // 11h. chatbot responds (mock) about the page

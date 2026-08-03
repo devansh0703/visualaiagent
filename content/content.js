@@ -708,9 +708,19 @@
       case 'vaia:agent_execute':
         sendResponse({ result: tools.executeAgentAction(msg.action, Number(msg.max) || 40) });
         return true;
-      case 'vaia:agent_ability':
-        sendResponse({ result: tools.agentAbility(msg.ability, msg.args || {}) });
+      case 'vaia:agent_ability': {
+        const p = tools.agentAbility(msg.ability, msg.args || {});
+        if (p && typeof p.then === 'function') {
+          p.then((result) => {
+            try {
+              sendResponse({ result });
+            } catch {}
+          });
+        } else {
+          sendResponse({ result: p });
+        }
         return true;
+      }
       case 'vaia:heatmap':
         if (msg.action === 'toggle') sendResponse({ mode: heatmap.toggle(msg.mode || 'clicks') });
         else if (msg.action === 'clear') {

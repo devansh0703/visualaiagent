@@ -459,8 +459,15 @@ function formatAbilityResult(res) {
   if (Array.isArray(res.plan) && res.plan.length) lines.push(res.plan.join('\n'));
   if (Array.isArray(res.issues) && res.issues.length) lines.push(res.issues.slice(0, 8).map((i) => `[${i.severity}] ${i.title}`).join('\n'));
   if (Array.isArray(res.steps) && res.steps.length) {
-    lines.push(res.steps.map((s) => `step ${s.step}: ${(s.action && s.action.type) || '?'} ${(s.action && s.action.ref) || ''}`).join('\n') + (res.result ? '\n→ ' + res.result : ''));
+    lines.push(res.steps.map((s) => `step ${s.step}: ${(s.action && s.action.type) || '?'} ${(s.action && s.action.ref) || ''} ${s.ok === false ? '✗ ' + (s.error || '') : s.ok ? '✓' : ''}`.trim()).join('\n') + (res.result ? '\n→ ' + res.result : ''));
   }
+  if (res.passed != null) lines.push(`\npassed ${res.passed} · failed ${res.failed}`);
+  if (res.report) lines.push('\n' + String(res.report).slice(0, 1600));
+  if (res.sources && res.sources.length) lines.push(`\n${res.sources.length} sources${res.live ? ' (live search)' : ' (offline)'}`);
+  if (res.tools && res.tools.length) lines.push('tools: ' + res.tools.join(', '));
+  if (res.tabs && res.tabs.length) lines.push(res.tabs.slice(0, 10).map((t) => `  [${t.index}]${t.active ? '▶' : ' '} ${t.title || t.url}`).join('\n'));
+  if (res.events && res.events.length) lines.push(res.events.slice(0, 10).map((e) => `  ${e.type} ${e.url}`).join('\n'));
+  if (res.diffScore != null) lines.push(`diff ${Math.round(res.diffScore * 100)}%`);
   if (res.reply) lines.push(res.reply);
   if (res.abilities) lines.push(`${res.count} abilities available`);
   if (res.count != null && !res.abilities && !lines.length) lines.push(`${res.count} result(s)`);

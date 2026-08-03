@@ -78,11 +78,57 @@ export function makeRoutedDoc(htmlEl, routes, bodyText = '') {
 }
 
 export function sandboxWith(shims) {
+  const ev = (type, init) => {
+    const e = { type };
+    Object.assign(e, init || {});
+    return e;
+  };
+  const clipboard = {
+    _text: '',
+    async readText() {
+      return clipboard._text;
+    },
+    async writeText(t) {
+      clipboard._text = String(t);
+    },
+  };
   const sandbox = {
     document: shims.document,
     window: { innerWidth: 1200, innerHeight: 800, scrollY: 0 },
     location: { href: 'https://x.com/a?q=1', pathname: '/a', hash: '' },
     CSS: { escape: (s) => String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&') },
+    Event: class Event {
+      constructor(type, init) {
+        this.type = type;
+        Object.assign(this, init || {});
+      }
+    },
+    MouseEvent: class MouseEvent {
+      constructor(type, init) {
+        this.type = type;
+        Object.assign(this, init || {});
+      }
+    },
+    KeyboardEvent: class KeyboardEvent {
+      constructor(type, init) {
+        this.type = type;
+        Object.assign(this, init || {});
+      }
+    },
+    PointerEvent: class PointerEvent {
+      constructor(type, init) {
+        this.type = type;
+        Object.assign(this, init || {});
+      }
+    },
+    FocusEvent: class FocusEvent {
+      constructor(type, init) {
+        this.type = type;
+        Object.assign(this, init || {});
+      }
+    },
+    getComputedStyle: () => ({ visibility: 'visible', display: 'block' }),
+    navigator: { clipboard },
     console,
   };
   sandbox.globalThis = sandbox;

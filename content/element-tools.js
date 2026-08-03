@@ -793,6 +793,245 @@
     }
   }
 
+  /* --------------- precise input actions (CUA-style mouse/keyboard) -------- */
+
+  function fireEvent(el, type, init) {
+    if (!el || typeof el.dispatchEvent !== 'function') return null;
+    let Ctor = typeof Event !== 'undefined' ? Event : null;
+    if (/^pointer/.test(type)) Ctor = typeof PointerEvent !== 'undefined' ? PointerEvent : typeof MouseEvent !== 'undefined' ? MouseEvent : Ctor;
+    else if (/^key/.test(type)) Ctor = typeof KeyboardEvent !== 'undefined' ? KeyboardEvent : Ctor;
+    else if (/^focus|^blur/.test(type)) Ctor = typeof FocusEvent !== 'undefined' ? FocusEvent : Ctor;
+    else Ctor = typeof MouseEvent !== 'undefined' ? MouseEvent : Ctor;
+    let ev = null;
+    try {
+      ev = new Ctor(type, init || {});
+    } catch {
+      ev = { type };
+    }
+    try {
+      el.dispatchEvent(ev);
+    } catch {}
+    return ev;
+  }
+
+  function resolveTarget(args) {
+    const ref = args && args.ref;
+    const text = args && args.text;
+    if (ref) return resolveAnyRef(ref);
+    if (text) {
+      const ql = String(text).toLowerCase();
+      return (
+        interactiveNodes(80).find((el) => {
+          const hay = [el.textContent, el.getAttribute && el.getAttribute('aria-label'), el.getAttribute && el.getAttribute('placeholder'), el.getAttribute && el.getAttribute('name')].filter(Boolean).join(' | ').toLowerCase();
+          return hay.includes(ql);
+        }) || null
+      );
+    }
+    return null;
+  }
+
+  function hoverElement(args) {
+    const target = resolveTarget(args);
+    if (!target) return { ok: false, error: 'no element found to hover' };
+    const r = target.getBoundingClientRect();
+    const cx = Math.round(r.x + r.width / 2);
+    const cy = Math.round(r.y + r.height / 2);
+    const init = { bubbles: true, cancelable: true, clientX: cx, clientY: cy, button: 0 };
+    ['pointerover', 'pointermove', 'mouseover', 'mouseenter', 'mousemove'].forEach((t) => fireEvent(target, t, init));
+    return { ok: true, type: 'hover', x: cx, y: cy, text: cleanText(target.textContent, 40) };
+  }
+
+  function doubleClickElement(args) {
+    const target = resolveTarget(args);
+    if (!target) return { ok: false, error: 'no element found to double-click' };
+    const r = target.getBoundingClientRect();
+    const init = { bubbles: true, cancelable: true, clientX: Math.round(r.x + r.width / 2), clientY: Math.round(r.y + r.height / 2), button: 0 };
+    fireEvent(target, 'pointerdown', init);
+    fireEvent(target, 'mousedown', init);
+    fireEvent(target, 'pointerup', init);
+    fireEvent(target, 'mouseup', init);
+    fireEvent(target, 'click', init);
+    fireEvent(target, 'pointerdown', init);
+    fireEvent(target, 'mousedown', init);
+    fireEvent(target, 'pointerup', init);
+    fireEvent(target, 'mouseup', init);
+    fireEvent(target, 'click', init);
+    fireEvent(target, 'dblclick', init);
+    return { ok: true, type: 'double_click', text: cleanText(target.textContent, 40) };
+  }
+
+  function rightClickElement(args) {
+    const target = resolveTarget(args);
+    if (!target) return { ok: false, error: 'no element found to right-click' };
+    const r = target.getBoundingClientRect();
+    const init = { bubbles: true, cancelable: true, clientX: Math.round(r.x + r.width / 2), clientY: Math.round(r.y + r.height / 2), button: 2 };
+    fireEvent(target, 'pointerdown', init);
+    fireEvent(target, 'mousedown', init);
+    fireEvent(target, 'pointerup', init);
+    fireEvent(target, 'mouseup', init);
+    fireEvent(target, 'contextmenu', init);
+    return { ok: true, type: 'right_click', text: cleanText(target.textContent, 40) };
+  }
+
+  function keyPress(args) {
+    const key = String((args && args.key) || '').trim();
+    if (!key) return { ok: false, error: 'key_press needs a key (e.g. Enter, Escape, Tab, "a", ctrl+s)' };
+    const target = (args && args.ref ? resolveAnyRef(args.ref) : null) || (typeof document !== 'undefined' && document.activeElement) || (typeof document !== 'undefined' ? document.body : null);
+    if (!target) return { ok: false, error: 'no focused element to send keys to' };
+    const init = {
+      bubbles: true,
+      cancelable: true,
+      key,
+      code: (args && args.code) || key,
+      ctrlKey: !!(args && args.ctrl),
+      altKey: !!(args && args.alt),
+      shiftKey: !!(args && args.shift),
+      metaKey: !!(args && args.meta),
+    };
+    fireEvent(target, 'keydown', init);
+    fireEvent(target, 'keypress', init);
+    fireEvent(target, 'keyup', init);
+    return { ok: true, type: 'key_press', key, on: (target.tagName || '').toLowerCase() };
+  }
+
+  function dragElement(args) {
+    const from = args && args.ref ? resolveAnyRef(args.ref) : null;
+    if (!from) return { ok: false, error: 'drag needs a source ref' };
+    const r = from.getBoundingClientRect();
+    const x0 = Math.round(r.x + r.width / 2);
+    const y0 = Math.round(r.y + r.height / 2);
+    let x1 = x0;
+    let y1 = y0;
+    if (args.toRef) {
+      const to = resolveAnyRef(args.toRef);
+      if (!to) return { ok: false, error: 'no target element for toRef ' + args.toRef };
+      const tr = to.getBoundingClientRect();
+      x1 = Math.round(tr.x + tr.width / 2);
+      y1 = Math.round(tr.y + tr.height / 2);
+    } else if (args.toX != null && args.toY != null) {
+      x1 = Number(args.toX);
+      y1 = Number(args.toY);
+    } else {
+      x1 = x0 + (Number(args.dx) || 0);
+      y1 = y0 + (Number(args.dy) || 0);
+    }
+    const pt = (x, y, button) => ({ bubbles: true, cancelable: true, clientX: x, clientY: y, button: button || 0 });
+    fireEvent(from, 'pointerdown', pt(x0, y0, 0));
+    fireEvent(from, 'mousedown', pt(x0, y0, 0));
+    const steps = 4;
+    for (let i = 1; i <= steps; i++) {
+      const x = Math.round(x0 + ((x1 - x0) * i) / steps);
+      const y = Math.round(y0 + ((y1 - y0) * i) / steps);
+      const el = elementFromPoint(x, y) || from;
+      fireEvent(el, 'pointermove', pt(x, y, 0));
+      fireEvent(el, 'mousemove', pt(x, y, 0));
+    }
+    fireEvent(elementFromPoint(x1, y1) || from, 'pointerup', pt(x1, y1, 0));
+    fireEvent(elementFromPoint(x1, y1) || from, 'mouseup', pt(x1, y1, 0));
+    return { ok: true, type: 'drag', from: { x: x0, y: y0 }, to: { x: x1, y: y1 }, dx: x1 - x0, dy: y1 - y0 };
+  }
+
+  function focusElement(args) {
+    const target = resolveTarget(args);
+    if (!target) return { ok: false, error: 'no element found to focus' };
+    if (typeof target.focus === 'function') target.focus();
+    fireEvent(target, 'focusin', { bubbles: true });
+    fireEvent(target, 'focus', { bubbles: false });
+    return { ok: true, type: 'focus', tag: (target.tagName || '').toLowerCase(), text: cleanText(target.textContent, 40) };
+  }
+
+  function elementState(args) {
+    const target = resolveTarget(args);
+    if (!target) return { ok: false, error: 'no element found' };
+    const r = target.getBoundingClientRect();
+    let cs = null;
+    if (typeof getComputedStyle === 'function') {
+      try {
+        cs = getComputedStyle(target);
+      } catch {}
+    }
+    const vw = (window && window.innerWidth) || 1200;
+    const vh = (window && window.innerHeight) || 800;
+    const visible = r.width > 0 && r.height > 0 && r.top < vh && r.bottom > 0 && r.left < vw && r.right > 0 && (!cs || (cs.visibility !== 'hidden' && cs.display !== 'none'));
+    const tag = (target.tagName || '').toLowerCase();
+    const ctype = (target.getAttribute && target.getAttribute('type')) || '';
+    const sensitive = isSensitiveElement(target);
+    return {
+      ok: true,
+      tag,
+      type: ctype,
+      visible,
+      disabled: !!(target.disabled || (target.hasAttribute && target.hasAttribute('disabled'))),
+      checked: tag === 'input' && (ctype === 'checkbox' || ctype === 'radio') ? !!target.checked : undefined,
+      value: (tag === 'input' || tag === 'textarea') && !sensitive ? String(target.value || '') : undefined,
+      text: cleanText(target.textContent, 40),
+      rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+    };
+  }
+
+  /** Readability-style extraction of the page's main article content. */
+  function readableContent() {
+    let root = null;
+    if (qsa('article').length) root = qsa('article')[0];
+    else if (qsa('main').length) root = qsa('main')[0];
+    else if (typeof document.querySelector === 'function') {
+      try {
+        root = document.querySelector('[role="main"]');
+      } catch {}
+    }
+    if (!root) root = document.body;
+    const seen = new Set();
+    const lines = [];
+    for (const p of qsa('p,h1,h2,h3,h4,h5,h6,li,blockquote,pre', root)) {
+      const t = cleanText(p.textContent, 300);
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      lines.push(t);
+    }
+    const text = lines.join('\n');
+    const words = text.split(/\s+/).filter(Boolean).length;
+    return {
+      ok: true,
+      title: document.title || '',
+      url: (typeof location !== 'undefined' && location.href) || '',
+      wordCount: words,
+      charCount: text.length,
+      text: text.slice(0, 8000),
+    };
+  }
+
+  async function clipboardRead() {
+    if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+      try {
+        const text = await navigator.clipboard.readText();
+        return { ok: true, text: String(text || ''), chars: String(text || '').length, source: 'clipboard-api' };
+      } catch {}
+    }
+    return { ok: false, error: 'clipboard read unavailable (needs focus + permission in this context)' };
+  }
+
+  async function clipboardWrite(args) {
+    const text = String((args && args.text) || '');
+    if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      try {
+        await navigator.clipboard.writeText(text);
+        return { ok: true, chars: text.length, source: 'clipboard-api' };
+      } catch {}
+    }
+    try {
+      if (typeof document.createElement !== 'function' || typeof document.body === 'undefined') throw new Error('no dom');
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style = { position: 'fixed', left: '-9999px' };
+      document.body.appendChild(ta);
+      ta.select = () => {};
+      const ok = typeof document.execCommand === 'function' ? document.execCommand('copy') : false;
+      document.body.removeChild(ta);
+      if (ok) return { ok: true, chars: text.length, source: 'execCommand' };
+    } catch {}
+    return { ok: false, error: 'clipboard write unavailable in this context' };
+  }
+
   function extractEntities(text) {
     const emails = new Set();
     const phones = new Set();
@@ -937,16 +1176,33 @@
     navigate: (a) => navigatePage(a),
     fill_form: (a) => fillForm(a),
     submit_form: (a) => submitForm(a),
+    hover: (a) => hoverElement(a),
+    double_click: (a) => doubleClickElement(a),
+    right_click: (a) => rightClickElement(a),
+    key_press: (a) => keyPress(a),
+    drag: (a) => dragElement(a),
+    focus: (a) => focusElement(a),
+    element_state: (a) => elementState(a),
+    readable: () => readableContent(),
+    clipboard_read: () => clipboardRead(),
+    clipboard_write: (a) => clipboardWrite(a),
   };
 
-  /** Execute one DOM ability. Returns { ok, ability, ...result } or { ok:false, error } */
+  function normalizeAgentResult(r, ability) {
+    if (r && typeof r === 'object' && !Array.isArray(r)) return { ...r, ok: r.ok !== false, ability };
+    return { ok: !!r, ability, result: r };
+  }
+
+  /** Execute one DOM ability. Returns { ok, ability, ...result }, or a Promise of it. */
   function agentAbility(ability, args) {
     const fn = ABILITY_ROUTER[ability];
     if (!fn) return { ok: false, error: 'unknown ability: ' + ability, available: Object.keys(ABILITY_ROUTER) };
     try {
       const r = fn(args || {});
-      if (r && typeof r === 'object' && !Array.isArray(r)) return { ...r, ok: r.ok !== false, ability };
-      return { ok: !!r, ability, result: r };
+      if (r && typeof r.then === 'function') {
+        return r.then((res) => normalizeAgentResult(res, ability)).catch((e) => ({ ok: false, error: e && e.message ? e.message : String(e), ability }));
+      }
+      return normalizeAgentResult(r, ability);
     } catch (e) {
       return { ok: false, error: e && e.message ? e.message : String(e), ability };
     }
@@ -977,6 +1233,9 @@
     agentAbility,
     resolveAnyRef,
     readForms,
+    resolveTarget,
+    elementState,
+    readableContent,
     TAG_BLACKLIST,
   });
 })(typeof globalThis !== 'undefined' ? globalThis : this);

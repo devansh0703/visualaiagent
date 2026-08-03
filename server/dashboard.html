@@ -412,13 +412,18 @@ function agentCard(d, when) {
       <div class="meta">${ts(when)} \u00b7 ${esc(d.provider || 'mock')} ${esc(d.model || '')}</div>
     </div>`;
   }
-  if (t === 'agent_ability') {
+  if (t === 'agent_ability' || t === 'research_report') {
     const r = d.result || {};
     const filled = (r.filled || []).map((f) => `<li>${esc(f.ref || f.key || '')} ${esc(f.key || '')} = <span class="mono">${esc(f.value || '')}</span></li>`).join('');
     const unmatched = (r.unmatched || []).map((u) => `<li>${esc(u)}</li>`).join('');
     const issues = (r.issues || []).map((i) => `<li><span class="sev-${esc(i.severity || 'low')}" style="padding:1px 5px;border:2px solid var(--ink);font:700 9px/1 var(--mono)">${esc(i.severity || 'low')}</span> ${esc(i.title || '')}${i.form != null ? ' (form ' + i.form + ')' : ''}</li>`).join('');
     const plan = (r.plan || []).map((p, i) => `<li>${esc(p)}</li>`).join('');
-    const steps = (r.steps || []).map((s) => `<div class="step"><b>step ${s.step}</b>${esc((s.action && s.action.type) || '?')}${(s.action && s.action.ref) ? ' \u2192 ' + esc(s.action.ref) : ''}</div>`).join('');
+    const steps = (r.steps || []).map((s) => `<div class="step ${s.ok ? 'ok' : s.ok === false ? 'fail' : ''}"><b>step ${s.step}</b>${esc((s.action && s.action.type) || '?')}${(s.action && s.action.ref) ? ' \u2192 ' + esc(s.action.ref) : ''}${s.ok === false && s.error ? ' <span class="muted">' + esc(s.error) + '</span>' : ''}</div>`).join('');
+    const report = r.report ? `<pre class="sec mono" style="white-space:pre-wrap;font-size:11px;max-height:260px;overflow:auto">${esc(r.report)}</pre>` : '';
+    const sources = (r.sources || []).map((s) => `<li>${esc(s.title || '')} <a class="mono" href="${esc(s.url || '#')}" target="_blank" rel="noreferrer">\u2197</a>${s.synthetic ? ' <span class="tag">offline</span>' : ''}</li>`).join('');
+    const checks = r.passed != null ? `<div class="sec">Checks</div><div class="kv">passed ${r.passed} \u00b7 failed ${r.failed}${r.citations != null ? ' \u00b7 sources ' + r.citations : ''}</div>` : '';
+    const tools = (r.tools || []).map((x) => `<li><span class="mono">${esc(typeof x === 'string' ? x : x.name)}</span> ${esc(typeof x === 'string' ? '' : x.description || '')}</li>`).join('');
+    const tabs = (r.tabs || []).map((tb) => `<li>${tb.active ? '\u25b6' : ' '} <span class="mono">${esc(tb.title || tb.url || '')}</span></li>`).join('');
     return `<div class="agent">
       <h3>${esc(d.title || 'Ability')}</h3>
       <p>${esc(d.body || '')}</p>
@@ -427,6 +432,11 @@ function agentCard(d, when) {
       ${issues ? `<div class="sec">Issues</div><ul>${issues}</ul>` : ''}
       ${plan ? `<div class="sec">Plan</div><ul>${plan}</ul>` : ''}
       ${steps ? `<div class="sec">Steps</div><div class="steps">${steps}</div>` : ''}
+      ${checks}
+      ${report}
+      ${sources ? `<div class="sec">Sources (${r.sources.length})</div><ul>${sources}</ul>` : ''}
+      ${tools ? `<div class="sec">MCP tools (${r.toolCount != null ? r.toolCount : r.tools.length})</div><ul>${tools}</ul>` : ''}
+      ${tabs ? `<div class="sec">Tabs</div><ul>${tabs}</ul>` : ''}
       <div class="meta">${ts(when)} \u00b7 ${esc(d.ok ? 'ok' : 'failed')} \u00b7 ${esc(d.ability || '')} \u00b7 ${esc(d.category || '')}</div>
     </div>`;
   }

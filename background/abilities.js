@@ -17,12 +17,19 @@
  */
 import * as vision from './vision.js';
 import { isMockVision, chat, runTask, pageReport, DEFAULT_MAX_STEPS } from './agent.js';
+import { planResearch, webSearch, synthesizeReport } from './research.js';
+import { imageSignature, pixelDiff } from './pixels.js';
+import { connectMcp, listTools, callTool } from './mcp.js';
 
 export { DEFAULT_MAX_STEPS };
 
 /* ----------------------------- chat history ------------------------------ */
 
 const chatHistory = new Map(); // sessionId -> [{role, content}]
+
+function sleepMs(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 export function getChat(sessionId) {
   return chatHistory.get(sessionId) || [];
@@ -242,6 +249,69 @@ def({
 /* ------------------------------ write ------------------------------------ */
 
 def({
+  id: 'element_state',
+  name: 'Element state',
+  category: 'read',
+  description: 'Live state of an element: visibility, disabled/checked flags, current value, text and rect.',
+  args: [
+    { name: 'ref', type: 'string', required: false, desc: 'elN or fN ref' },
+    { name: 'text', type: 'string', required: false, desc: 'or match by label text' },
+  ],
+  run: (ctx, a) => ctx.dom('element_state', { ref: a.ref, text: a.text }),
+});
+
+def({
+  id: 'page_readable',
+  name: 'Extract article',
+  category: 'read',
+  description: 'Readability extraction of the main article content (title, paragraphs, word count).',
+  run: (ctx) => ctx.dom('readable'),
+});
+
+def({
+  id: 'clipboard_read',
+  name: 'Read clipboard',
+  category: 'read',
+  description: 'Read the text currently on the clipboard.',
+  run: (ctx) => ctx.dom('clipboard_read'),
+});
+
+def({
+  id: 'session_log',
+  name: 'Session log',
+  category: 'read',
+  description: 'What happened: recent tracked events and agent insights for this session.',
+  args: [{ name: 'limit', type: 'number', required: false, desc: 'max events to return (default 30)' }],
+  run: async (ctx, a) => {
+    const limit = Math.min(100, Number(a.limit) || 30);
+    let events = [];
+    let insights = [];
+    if (ctx.queryEvents) {
+      try {
+        events = (await ctx.queryEvents({ limit: Math.min(limit, 50) })) || [];
+      } catch {}
+    }
+    if (ctx.queryInsights) {
+      try {
+        insights = (await ctx.queryInsights({ limit: 10 })) || [];
+      } catch {}
+    }
+    const rows = events.map((e) => ({ ts: e.ts, type: e.type, url: String(e.url || '').slice(0, 140) })).slice(0, limit);
+    const notes = insights.map((i) => ({ ts: i.ts, type: i.type, title: String(i.title || '').slice(0, 140) }));
+    return {
+      ok: true,
+      summary: `${rows.length} event(s), ${notes.length} agent insight(s) in the current session`,
+      eventCount: rows.length,
+      insightCount: notes.length,
+      events: rows,
+      insights: notes,
+    };
+  },
+});
+
+/* ------------------------------ write ------------------------------------ */
+
+def({
   id: 'click_element',
   name: 'Click element',
   category: 'write',
@@ -367,6 +437,222 @@ def({
   },
 });
 
+/* ---- precise input actions (virtual mouse / keyboard, like CUA) --------- */
+
+def({
+  id: 'hover_element',
+  name: 'Hover element',
+  category: 'write',
+  description: 'Move the virtual pointer over an element (fires pointer/mouse hover events).',
+  args: [
+    { name: 'ref', type: 'string', required: false, desc: 'elN or fN ref' },
+    { name: 'text', type: 'string', required: false, desc: 'or match by label text' },
+  ],
+  run: (ctx, a) => ctx.dom('hover', { ref: a.ref, text: a.text }),
+});
+
+def({
+  id: 'double_click',
+  name: 'Double-click element',
+  category: 'write',
+  description: 'Double-click an element (fires click, click, dblclick).',
+  args: [
+    { name: 'ref', type: 'string', required: false, desc: 'elN or fN ref' },
+    { name: 'text', type: 'string', required: false, desc: 'or match by label text' },
+  ],
+  run: (ctx, a) => ctx.dom('double_click', { ref: a.ref, text: a.text }),
+});
+
+def({
+  id: 'right_click',
+  name: 'Right-click element',
+  category: 'write',
+  description: 'Right-click an element (fires contextmenu).',
+  args: [
+    { name: 'ref', type: 'string', required: false, desc: 'elN or fN ref' },
+    { name: 'text', type: 'string', required: false, desc: 'or match by label text' },
+  ],
+  run: (ctx, a) => ctx.dom('right_click', { ref: a.ref, text: a.text }),
+});
+
+def({
+  id: 'key_press',
+  name: 'Press keyboard key',
+  category: 'write',
+  description: 'Send a keyboard key / shortcut to the focused element or page (Enter, Escape, Tab, ctrl+s, …).',
+  args: [
+    { name: 'key', type: 'string', required: true, desc: 'e.g. Enter, Escape, Tab, "a"' },
+    { name: 'ref', type: 'string', required: false, desc: 'fN ref to focus first (optional)' },
+    { name: 'ctrl', type: 'boolean', required: false, desc: 'hold Ctrl' },
+    { name: 'shift', type: 'boolean', required: false, desc: 'hold Shift' },
+    { name: 'alt', type: 'boolean', required: false, desc: 'hold Alt' },
+  ],
+  run: (ctx, a) => ctx.dom('key_press', { key: a.key, ref: a.ref, ctrl: a.ctrl, shift: a.shift, alt: a.alt }),
+});
+
+def({
+  id: 'drag_element',
+  name: 'Drag element',
+  category: 'write',
+  description: 'Drag an element to a target ref, coordinates, or by dx/dy offset (fires drag gesture).',
+  args: [
+    { name: 'ref', type: 'string', required: true, desc: 'source elN/fN ref' },
+    { name: 'toRef', type: 'string', required: false, desc: 'target element ref' },
+    { name: 'dx', type: 'number', required: false, desc: 'horizontal offset' },
+    { name: 'dy', type: 'number', required: false, desc: 'vertical offset' },
+  ],
+  run: (ctx, a) => ctx.dom('drag', { ref: a.ref, toRef: a.toRef, dx: a.dx, dy: a.dy, toX: a.toX, toY: a.toY }),
+});
+
+def({
+  id: 'focus_element',
+  name: 'Focus element',
+  category: 'write',
+  description: 'Focus an element (like Tab navigation) without clicking.',
+  args: [
+    { name: 'ref', type: 'string', required: false, desc: 'elN or fN ref' },
+    { name: 'text', type: 'string', required: false, desc: 'or match by label text' },
+  ],
+  run: (ctx, a) => ctx.dom('focus', { ref: a.ref, text: a.text }),
+});
+
+def({
+  id: 'clipboard_write',
+  name: 'Write clipboard',
+  category: 'write',
+  description: 'Copy text to the clipboard.',
+  args: [{ name: 'text', type: 'string', required: true, desc: 'text to copy' }],
+  run: (ctx, a) => ctx.dom('clipboard_write', { text: a.text }),
+});
+
+/* ---- waiting / observation (self-correction loop) ------------------------ */
+
+def({
+  id: 'wait_seconds',
+  name: 'Wait',
+  category: 'write',
+  description: 'Pause for N seconds (useful between steps that trigger async work).',
+  args: [{ name: 'seconds', type: 'number', required: true, desc: 'seconds to wait (max 120)' }],
+  run: async (ctx, a) => {
+    const s = Math.min(120, Math.max(0, Number(a.seconds) || 1));
+    await sleepMs(s * 1000);
+    return { ok: true, summary: `waited ${s} second(s)`, waitedSec: s };
+  },
+});
+
+def({
+  id: 'wait_for_element',
+  name: 'Wait for element',
+  category: 'write',
+  description: 'Poll until an element with the given text/label is visible (or a timeout elapses).',
+  args: [
+    { name: 'text', type: 'string', required: true, desc: 'text or label to wait for' },
+    { name: 'timeoutSec', type: 'number', required: false, desc: 'timeout in seconds (default 10)' },
+  ],
+  run: async (ctx, a) => {
+    const text = String(a.text || '').trim();
+    if (!text) return { ok: false, error: 'wait_for_element needs text' };
+    const timeoutMs = Math.min(30000, Math.max(1000, Number(a.timeoutSec || 10) * 1000));
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const res = await ctx.dom('find_element', { text });
+      if (res && res.ok) {
+        return { ok: true, summary: `"${text}" appeared after ${Date.now() - started}ms`, foundAfterMs: Date.now() - started, count: res.count, matches: res.matches };
+      }
+      await sleepMs(500);
+    }
+    return { ok: false, error: `"${text}" did not appear within ${Math.round(timeoutMs / 1000)}s` };
+  },
+});
+
+/* ---- tab / window management --------------------------------------------- */
+
+def({
+  id: 'tabs_list',
+  name: 'List tabs',
+  category: 'write',
+  description: 'List every open tab across windows (index, id, url, title, active).',
+  run: async (ctx) => {
+    if (!ctx.tabs) return { ok: false, error: 'tabs API unavailable' };
+    let all = [];
+    try {
+      all = await ctx.tabs.query({});
+    } catch (e) {
+      return { ok: false, error: 'tabs.query failed: ' + e.message };
+    }
+    const tabs = all.map((t, i) => ({ index: i, id: t.id, active: !!t.active, pinned: !!t.pinned, windowId: t.windowId, url: String(t.url || '').slice(0, 200), title: String(t.title || '').slice(0, 120) }));
+    return { ok: true, summary: `${tabs.length} tab(s) open`, count: tabs.length, tabs };
+  },
+});
+
+def({
+  id: 'tab_open',
+  name: 'Open tab',
+  category: 'write',
+  description: 'Open a new tab with a URL.',
+  args: [{ name: 'url', type: 'string', required: true, desc: 'full URL' }],
+  run: async (ctx, a) => {
+    if (!ctx.tabs) return { ok: false, error: 'tabs API unavailable' };
+    const url = String(a.url || '').trim();
+    if (!url) return { ok: false, error: 'tab_open needs a url' };
+    const tab = await ctx.tabs.create({ url, active: true });
+    return { ok: true, summary: `opened ${String(url).slice(0, 60)}`, tabId: tab && tab.id, url };
+  },
+});
+
+def({
+  id: 'tab_switch',
+  name: 'Switch tab',
+  category: 'write',
+  description: 'Activate a tab by its list index (from tabs_list) or id.',
+  args: [
+    { name: 'index', type: 'number', required: false, desc: 'index from tabs_list' },
+    { name: 'id', type: 'number', required: false, desc: 'or numeric tab id' },
+  ],
+  run: async (ctx, a) => {
+    if (!ctx.tabs) return { ok: false, error: 'tabs API unavailable' };
+    let tabId = null;
+    if (a.id != null) tabId = Number(a.id);
+    else if (a.index != null) {
+      const all = await ctx.tabs.query({});
+      const t = all[Number(a.index)];
+      if (!t) return { ok: false, error: 'no tab at index ' + a.index };
+      tabId = t.id;
+    } else return { ok: false, error: 'tab_switch needs index or id' };
+    await ctx.tabs.update(tabId, { active: true });
+    const t = await ctx.tabs.get(tabId);
+    return { ok: true, summary: `switched to tab ${tabId} — ${String(t.title || t.url || '').slice(0, 60)}`, tabId, title: t.title };
+  },
+});
+
+def({
+  id: 'tab_close',
+  name: 'Close tab',
+  category: 'write',
+  description: 'Close a tab by index or id (omit both to close the current tab).',
+  args: [
+    { name: 'index', type: 'number', required: false, desc: 'index from tabs_list' },
+    { name: 'id', type: 'number', required: false, desc: 'or numeric tab id' },
+  ],
+  run: async (ctx, a) => {
+    if (!ctx.tabs) return { ok: false, error: 'tabs API unavailable' };
+    let tabId = null;
+    if (a.id != null) tabId = Number(a.id);
+    else if (a.index != null) {
+      const all = await ctx.tabs.query({});
+      const t = all[Number(a.index)];
+      if (!t) return { ok: false, error: 'no tab at index ' + a.index };
+      tabId = t.id;
+    } else {
+      const active = await ctx.tabs.query({ active: true, lastFocusedWindow: true });
+      tabId = active[0] && active[0].id;
+    }
+    if (tabId == null) return { ok: false, error: 'no tab to close' };
+    await ctx.tabs.remove(tabId);
+    return { ok: true, summary: `closed tab ${tabId}`, tabId };
+  },
+});
+
 /* ------------------------------- agent ----------------------------------- */
 
 def({
@@ -485,6 +771,332 @@ def({
   },
 });
 
+/* ---- end-to-end UI validation (build → click through → verify) ---------- */
+
+const UI_VALIDATE_STEP_HINT = [
+  { action: 'click', ref: 'el2', text: 'or button label' },
+  { action: 'type', ref: 'f1', value: 'hello' },
+  { action: 'check', ref: 'el3' },
+  { action: 'check', text: 'Success message' },
+  { action: 'select', ref: 'f3', value: 'us' },
+  { action: 'submit' },
+  { action: 'goto', url: 'https://example.com' },
+  { action: 'wait', ms: 500 },
+];
+
+def({
+  id: 'ui_validate',
+  name: 'Validate UI flow',
+  category: 'agent',
+  description:
+    'End-to-end UI test: run an ordered list of steps (click / type / check / select / submit / goto / wait / screenshot) and report pass/fail per step. Each step accepts { action, ref, text, value, expect, failFast }.',
+  args: [
+    { name: 'steps', type: 'json', required: false, desc: 'array of steps — see description' },
+    { name: 'failFast', type: 'boolean', required: false, desc: 'stop on first failure (default true)' },
+  ],
+  run: async (ctx, a) => {
+    const steps = Array.isArray(a.steps) && a.steps.length ? a.steps : null;
+    if (!steps) {
+      return { ok: false, error: 'ui_validate needs a steps array', hint: UI_VALIDATE_STEP_HINT };
+    }
+    const failFast = a.failFast !== false;
+    const results = [];
+    let passed = 0;
+    let failed = 0;
+    for (let i = 0; i < steps.length; i++) {
+      const s = steps[i] || {};
+      const rec = { step: i + 1, action: { type: String(s.action || '?'), ref: s.ref, value: s.value }, args: { ref: s.ref, text: s.text, value: s.value, url: s.url, dir: s.dir, amount: s.amount, formIndex: s.formIndex } };
+      try {
+        let r = null;
+        switch (s.action) {
+          case 'wait':
+            await sleepMs(Math.max(0, Number(s.ms) || 300));
+            r = { ok: true };
+            break;
+          case 'check':
+            if (s.ref) r = await ctx.dom('element_state', { ref: s.ref });
+            else r = await ctx.dom('find_element', { text: s.text || '' });
+            r = { ok: !!(r && r.ok), error: r && !r.ok ? r.error : null };
+            break;
+          case 'click':
+            r = await ctx.dom('click', { ref: s.ref, text: s.text });
+            break;
+          case 'type':
+            r = await ctx.dom('type', { ref: s.ref, value: s.value });
+            break;
+          case 'select':
+            r = await ctx.dom('select', { ref: s.ref, value: s.value });
+            break;
+          case 'scroll':
+            r = await ctx.dom('scroll', { dir: s.dir, amount: s.amount });
+            break;
+          case 'goto':
+            r = await ctx.dom('navigate', { url: s.url });
+            await sleepMs(800);
+            break;
+          case 'submit':
+            r = await ctx.dom('submit_form', { formIndex: s.formIndex });
+            break;
+          case 'screenshot': {
+            const shot = await ctx.capture();
+            r = { ok: !!shot, screenshotId: shot ? shot.id : null, error: shot ? null : 'capture failed' };
+            break;
+          }
+          default:
+            r = { ok: false, error: 'unsupported ui_validate step: ' + s.action };
+        }
+        rec.ok = !!(r && r.ok);
+        rec.error = (r && r.error) || null;
+        rec.screenshotId = (r && r.screenshotId) || null;
+      } catch (e) {
+        rec.ok = false;
+        rec.error = e && e.message ? e.message : String(e);
+      }
+      if (rec.ok) passed++;
+      else failed++;
+      results.push(rec);
+      if (!rec.ok && failFast) break;
+    }
+    return {
+      ok: failed === 0,
+      summary: `${passed} passed, ${failed} failed across ${results.length} step(s)`,
+      passed,
+      failed,
+      total: results.length,
+      failFast,
+      steps: results,
+      body: `${passed} passed, ${failed} failed across ${results.length} step(s) of ${steps.length}`,
+    };
+  },
+});
+
+/* ---- visual before/after check (debug: repro → verify) ------------------ */
+
+const visualBaselines = new Map(); // url -> signature
+
+def({
+  id: 'visual_check',
+  name: 'Visual check',
+  category: 'agent',
+  description:
+    'Capture the screen and compare it to the stored baseline for this URL. First run stores the baseline; later runs report how much the page changed and where.',
+  args: [
+    { name: 'url', type: 'string', required: false, desc: 'baseline key (defaults to "current")' },
+    { name: 'reset', type: 'boolean', required: false, desc: 'replace the stored baseline' },
+  ],
+  run: async (ctx, a) => {
+    const dataUrl = await ctx.capture();
+    if (!dataUrl) return { ok: false, error: 'visual_check needs a screenshot (capture failed)' };
+    const key = String(a.url || 'current');
+    const sig = await imageSignature(dataUrl);
+    if (!sig) return { ok: true, available: false, note: 'image decoding unavailable in this environment', summary: 'visual diff not available here (no image decoder)' };
+    const prev = visualBaselines.get(key);
+    if (!prev || a.reset) {
+      visualBaselines.set(key, sig);
+      return { ok: true, baseline: true, stored: true, summary: `baseline stored for "${key}"`, key, cells: sig.cells };
+    }
+    const diff = pixelDiff(prev, sig);
+    const changed = diff.score > 0.05;
+    return {
+      ok: true,
+      baseline: false,
+      changed,
+      summary: changed ? `page changed: diff ${Math.round(diff.score * 100)}% across ${diff.changedCells} zone(s)` : 'page unchanged (within tolerance)',
+      diffScore: diff.score,
+      changedCells: diff.changedCells,
+      key,
+      zones: changed ? null : undefined,
+    };
+  },
+});
+
+/* ---- deep research (plan → search → synthesize, Gemini-style) ----------- */
+
+def({
+  id: 'deep_research',
+  name: 'Deep research',
+  category: 'agent',
+  description:
+    'Multi-step research report: plan queries, gather sources (live web search when a real provider + research opt-in is set, offline otherwise), and synthesize a cited report.',
+  args: [
+    { name: 'topic', type: 'string', required: true, desc: 'what to research' },
+    { name: 'depth', type: 'number', required: false, desc: 'queries per pass, 2-7 (default 3)' },
+    { name: 'async', type: 'boolean', required: false, desc: 'run in the background and poll with task_status' },
+  ],
+  run: async (ctx, a) => {
+    const topic = String(a.topic || '').trim();
+    if (!topic) return { ok: false, error: 'deep_research needs a topic' };
+    const depth = Math.min(7, Math.max(2, Number(a.depth) || 3));
+    if (ctx.reportProgress) ctx.reportProgress({ status: 'running', stage: 'planning', pct: 5 });
+    const plan = await planResearch(topic, depth, { isMock: ctx.isMock(), config: ctx.config });
+    if (ctx.isCancelled && ctx.isCancelled()) return { ok: false, cancelled: true, error: 'deep_research cancelled during planning' };
+    const live = !ctx.isMock() && !!ctx.config && ctx.config.research && ctx.config.research.enabled !== false;
+    const sources = [];
+    if (ctx.reportProgress) ctx.reportProgress({ status: 'running', stage: 'searching', pct: 15 });
+    for (let i = 0; i < plan.queries.length; i++) {
+      if (ctx.isCancelled && ctx.isCancelled()) return { ok: false, cancelled: true, error: 'deep_research cancelled during search' };
+      const res = await webSearch(plan.queries[i], { maxResults: depth, live });
+      sources.push(...res.sources);
+      if (ctx.reportProgress) ctx.reportProgress({ status: 'running', stage: 'searching', pct: 15 + Math.round(((i + 1) / plan.queries.length) * 55) });
+    }
+    if (ctx.reportProgress) ctx.reportProgress({ status: 'running', stage: 'synthesizing', pct: 75 });
+    const report = await synthesizeReport(topic, plan, sources, { isMock: ctx.isMock(), config: ctx.config });
+    if (ctx.reportProgress) ctx.reportProgress({ status: 'done', stage: 'done', pct: 100 });
+    return {
+      ok: true,
+      topic,
+      provider: report.provider,
+      model: report.model,
+      summary: report.summary,
+      report: report.body,
+      live,
+      sources: sources.slice(0, 40),
+      citations: sources.length,
+      plan: plan.steps,
+    };
+  },
+});
+
+/* ---- background task status (Gemini-style background execution + polling) */
+
+def({
+  id: 'task_status',
+  name: 'Task status',
+  category: 'agent',
+  description: 'Poll the status of a background task (run abilities with async: true).',
+  args: [{ name: 'taskId', type: 'string', required: true, desc: 'task id from an async run' }],
+  run: async (ctx, a) => {
+    const id = String(a.taskId || '').trim();
+    if (!id) return { ok: false, error: 'task_status needs a taskId' };
+    if (!ctx.taskStatus) return { ok: false, error: 'task store unavailable' };
+    const t = ctx.taskStatus(id);
+    if (!t) return { ok: false, error: 'no task with id ' + id };
+    return {
+      ok: true,
+      summary: `task ${id.slice(0, 8)} is ${t.status}${(t.progress && t.progress.stage) ? ' (' + t.progress.stage + ')' : ''}`,
+      taskId: id,
+      ability: t.ability,
+      status: t.status,
+      stage: (t.progress && t.progress.stage) || '',
+      pct: (t.progress && t.progress.pct) || 0,
+      error: t.error || '',
+    };
+  },
+});
+
+def({
+  id: 'task_cancel',
+  name: 'Cancel task',
+  category: 'agent',
+  description: 'Request cancellation of a running background task (takes effect between deep-research phases).',
+  args: [{ name: 'taskId', type: 'string', required: true, desc: 'task id from an async run' }],
+  run: async (ctx, a) => {
+    const id = String(a.taskId || '').trim();
+    if (!id) return { ok: false, error: 'task_cancel needs a taskId' };
+    if (!ctx.taskStatus) return { ok: false, error: 'task store unavailable' };
+    const t = ctx.taskStatus(id);
+    if (!t) return { ok: false, error: 'no task with id ' + id };
+    t.cancelled = true;
+    t.status = 'cancelling';
+    return { ok: true, summary: `cancellation requested for task ${id.slice(0, 8)}`, taskId: id, status: 'cancelling' };
+  },
+});
+
+/* ---- MCP connectivity (Claude-first: prefer the server's own tools) ----- */
+
+const mcpClients = new Map(); // name -> client
+
+def({
+  id: 'mcp_connect',
+  name: 'Connect MCP server',
+  category: 'agent',
+  description: 'Connect to a Model Context Protocol server (Streamable HTTP) and load its tools, like Claude Desktop / Gemini do.',
+  args: [
+    { name: 'url', type: 'string', required: true, desc: 'http(s) MCP endpoint' },
+    { name: 'name', type: 'string', required: false, desc: 'name to remember it by (default: host)' },
+  ],
+  run: async (ctx, a) => {
+    const url = String(a.url || '').trim();
+    if (!/^https?:\/\//.test(url)) return { ok: false, error: 'mcp_connect needs an http(s) URL' };
+    const client = await connectMcp(url, { name: a.name });
+    mcpClients.set(client.name, client);
+    let tools = [];
+    try {
+      tools = await listTools(client);
+    } catch (e) {
+      tools = [];
+    }
+    return {
+      ok: true,
+      summary: `connected to ${client.name} (${tools.length} tool(s) loaded)`,
+      name: client.name,
+      url,
+      server: client.serverInfo,
+      protocol: client.protocolVersion,
+      tools: tools.map((t) => t.name),
+      toolCount: tools.length,
+    };
+  },
+});
+
+def({
+  id: 'mcp_tools',
+  name: 'MCP server tools',
+  category: 'agent',
+  description: 'List the tools of a connected MCP server.',
+  args: [{ name: 'name', type: 'string', required: false, desc: 'server name (default: first connected)' }],
+  run: async (ctx, a) => {
+    const name = String(a.name || '').trim();
+    const client = name ? mcpClients.get(name) : mcpClients.values().next().value;
+    if (!client) return { ok: false, error: 'no MCP server connected — run mcp_connect first', connected: [...mcpClients.keys()] };
+    const tools = await listTools(client);
+    return {
+      ok: true,
+      summary: `${tools.length} tool(s) on ${client.name}`,
+      name: client.name,
+      tools: tools.map((t) => ({ name: t.name, description: String(t.description || '').slice(0, 200) })),
+    };
+  },
+});
+
+def({
+  id: 'mcp_call',
+  name: 'Call MCP tool',
+  category: 'agent',
+  description: 'Call a tool on a connected MCP server with JSON arguments.',
+  args: [
+    { name: 'tool', type: 'string', required: true, desc: 'tool name' },
+    { name: 'server', type: 'string', required: false, desc: 'server name (default: first connected)' },
+    { name: 'args', type: 'json', required: false, desc: 'JSON arguments object' },
+  ],
+  run: async (ctx, a) => {
+    const name = String(a.server || '').trim();
+    const client = name ? mcpClients.get(name) : mcpClients.values().next().value;
+    if (!client) return { ok: false, error: 'no MCP server connected — run mcp_connect first', connected: [...mcpClients.keys()] };
+    const tool = String(a.tool || '').trim();
+    if (!tool) return { ok: false, error: 'mcp_call needs a tool name' };
+    let args = {};
+    if (a.args != null) {
+      if (typeof a.args === 'string') {
+        try {
+          args = JSON.parse(a.args);
+        } catch {
+          return { ok: false, error: 'mcp_call args must be a JSON object' };
+        }
+      } else if (typeof a.args === 'object') args = a.args;
+    }
+    const out = await callTool(client, tool, args);
+    return {
+      ok: true,
+      summary: `${name}.${tool} returned ${out.isError ? 'an error' : out.content.length + ' content block(s)'}`,
+      server: name,
+      tool,
+      content: out.content,
+      isError: out.isError,
+    };
+  },
+});
+
 /* ------------------------------- meta ------------------------------------ */
 
 def({
@@ -518,6 +1130,33 @@ def({
   category: 'meta',
   description: 'List every ability the agent has, with its arguments.',
   run: () => ({ ok: true, count: ABILITIES.length, abilities: listAbilities() }),
+});
+
+def({
+  id: 'viewport_set',
+  name: 'Resize window',
+  category: 'meta',
+  description: 'Resize the browser window (visual-debug repro: set a target size, capture, compare).',
+  args: [
+    { name: 'width', type: 'number', required: true, desc: 'outer window width in px' },
+    { name: 'height', type: 'number', required: true, desc: 'outer window height in px' },
+  ],
+  run: async (ctx, a) => {
+    const w = Number(a.width);
+    const h = Number(a.height);
+    if (!(w > 0) || !(h > 0)) return { ok: false, error: 'viewport_set needs positive width and height' };
+    if (!ctx.windows) return { ok: false, error: 'windows API unavailable' };
+    let win = null;
+    try {
+      win = ctx.windows.getLastFocused ? await ctx.windows.getLastFocused() : null;
+      if (!win && ctx.windows.getCurrent) win = await ctx.windows.getCurrent();
+    } catch (e) {
+      return { ok: false, error: 'windows.getLastFocused failed: ' + e.message };
+    }
+    if (!win) return { ok: false, error: 'no focused window' };
+    const upd = await ctx.windows.update(win.id, { width: w, height: h });
+    return { ok: true, summary: `window resized to ${upd.width}x${upd.height}`, width: upd.width, height: upd.height };
+  },
 });
 
 /* ------------------------------ public API -------------------------------- */
