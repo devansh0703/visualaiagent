@@ -107,6 +107,39 @@ all 73 skills with their arguments and a Run button. The dashboard's
 
 Screenshots of the dashboard and agent runs live in `demo/`.
 
+## UI pages
+
+The extension ships four surfaces:
+
+### 1. Popup — `ui/popup/popup.html`
+One-click control panel from the toolbar icon:
+- **Ask** — chat with the agent about the current tab (vision-backed when a key is set)
+- **Chatbot** — multi-turn conversation that remembers the session and can invoke abilities
+- **Agent abilities** — browsable list of all 73 skills, each with its arguments and a
+  **Run** button
+- **Task** — analyze the page, run a natural-language task, or validate a scripted UI flow
+- Live counters (events today, screenshots, attention), pause/resume, capture, dashboard and
+  options links
+
+### 2. Options — `ui/options/options.html`
+Tabbed settings: **General**, **Tracking**, **Capture**, **Vision AI** (provider / model /
+API key), **Privacy** (masking, deny/allow hosts, sensitive domains), **Database** (endpoint,
+queue), **Insights** (detectors, LLM summaries).
+
+### 3. Extension dashboard — `ui/dashboard/dashboard.html`
+In-browser telemetry viewer (`Alt+Shift+D`): **Live** event feed, **Sessions**, **Replay**
+(screenshot frames), **Insights**, **Heatmaps** (click/move overlay), and **Stats**.
+
+### 4. Receiver dashboard + API — `server/`
+Self-hosted reference receiver (`npm run server` → http://localhost:8787):
+- Dashboard tabs: **TODAY**, **EVENTS**, **INSIGHTS**, **AGENT** (page reports, task
+  transcripts, chat turns, ability runs), **SESSIONS**, **SCREENSHOTS**, **HEATMAP**
+- Endpoints: `POST /api/events|screenshots|insights|sessions` for the extension,
+  `GET /api/events|screenshots|insights|sessions|stats|heatmap|attention|focus|export` for
+  charts and data export, plus `GET /demo` — a small page for exercising the extension
+- Data lives in `data/telemetry.db` (SQLite via `node:sqlite`); frame payloads are written to
+  `data/screenshots/` as JPEGs
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
