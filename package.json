@@ -9,6 +9,7 @@
     "test:integration": "node --test \"test/integration/*.test.mjs\"",
     "e2e": "node test/e2e/run.mjs",
     "server": "node server/server.mjs",
+    "demo:capture": "node scripts/capture-demo.mjs",
     "icons": "node tools/gen-icons.mjs"
   },
   "engines": {

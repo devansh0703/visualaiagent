@@ -113,6 +113,14 @@ Screenshots of the dashboard and agent runs live in `demo/`:
 
 ![Insights tab](demo/dash-insights.png)
 
+![Agent tab](demo/dash-agent.png)
+
+![Sessions tab](demo/dash-sessions.png)
+
+![Screenshots tab](demo/dash-screenshots.png)
+
+![Heatmap tab](demo/dash-heatmap.png)
+
 ## UI pages
 
 The extension ships four surfaces:

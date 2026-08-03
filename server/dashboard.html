@@ -491,7 +491,7 @@ async function renderSessions() {
   const res = await get('/api/sessions?limit=50');
   const rows = res.rows || [];
   $('sessionsBody').innerHTML = rows.map((r)=>{
-    const focus = r.payload ? JSON.parse(r.payload).focus : null;
+    const focus = r.data && r.data.focus ? r.data.focus : null;
     const focusTxt = focus ? (focus.score*100).toFixed(0)+'%' : '—';
     return `<tr>
       <td class="mono muted">${ts(r.started_at)}</td>

@@ -11,6 +11,10 @@ with the extension loaded in headless Chrome.
 | `dash-today.png` | Today tab — stat blocks, ranked time-on-sites, focus histogram, distraction budget meter |
 | `dash-events.png` | Events tab — neobrutalist event log table with type chips |
 | `dash-insights.png` | Insights tab — color-coded insight cards |
+| `dash-agent.png` | Agent tab — chat turns, ability runs, page reports, task transcripts |
+| `dash-sessions.png` | Sessions tab — session list with duration, events, errors, rage clicks, focus % |
+| `dash-screenshots.png` | Screenshots tab — captured frames grid served at `/shots/<file>` |
+| `dash-heatmap.png` | Heatmap tab — click/mouse-down density hotspots from the last 500 points |
 
 ## Captured activity
 
@@ -32,5 +36,15 @@ Then load the extension from this repo (`Load unpacked` in
 ## Regenerating
 
 The E2E test wipes `data/telemetry.db` and rebuilds it from scratch on every
-run, so these assets age out — re-run `npm run e2e` and re-capture
-`dash-*.png` to refresh them.
+run. To refresh the dashboard screenshots with a self-contained (non-E2E)
+seed, run:
+
+```bash
+npm install
+npm run demo:capture
+```
+
+This starts a fresh receiver on port 8792, seeds realistic telemetry
+(sessions, attention timeline, heatmap clicks, screenshots, heuristic +
+agent insights), screenshots all seven dashboard tabs, and writes
+`demo/dash-*.png`.
