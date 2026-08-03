@@ -105,7 +105,13 @@ translates natural language into abilities; the **Agent abilities** card lists
 all 73 skills with their arguments and a Run button. The dashboard's
 **Agent** tab shows every report, task transcript, chat turn and ability run.
 
-Screenshots of the dashboard and agent runs live in `demo/`.
+Screenshots of the dashboard and agent runs live in `demo/`:
+
+![Today tab](demo/dash-today.png)
+
+![Events tab](demo/dash-events.png)
+
+![Insights tab](demo/dash-insights.png)
 
 ## UI pages
 
