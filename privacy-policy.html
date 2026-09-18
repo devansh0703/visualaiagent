@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Visual AI Agent — Privacy Policy</title>
+<style>
+  body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;line-height:1.65;color:#1c1c1c}
+  h1{font-size:1.6em} h2{margin-top:1.8em;font-size:1.15em}
+  code{background:#f2f2f2;padding:1px 5px;border-radius:4px;font-size:.92em}
+  .upd{color:#666;font-size:.9em}
+</style>
+</head>
+<body>
+<h1>Privacy Policy — Visual AI Agent</h1>
+<p class="upd">Last updated: September 19, 2026 · Applies to version 1.1.0+</p>
+
+<h2>Summary</h2>
+<p>Visual AI Agent (VAIA) is a <strong>local-first</strong> browser telemetry and screen-analysis tool. Your browsing data, screenshots, and AI analyses are stored <strong>on your own computer</strong> and sent only to <strong>a receiver server you choose</strong> (by default, your own machine at <code>http://localhost:8787</code>). The extension's publisher operates no servers, receives no data, and has no access to anything the extension records.</p>
+
+<h2>What the extension collects</h2>
+<ul>
+  <li><strong>Activity events:</strong> page views, clicks, scrolls, keystroke <em>metadata</em> (that typing occurred), navigation and error events.</li>
+  <li><strong>Screenshots:</strong> periodic captures of the visible tab, only when capture is enabled.</li>
+  <li><strong>AI analyses:</strong> descriptions of captured screens produced by the vision provider <em>you</em> configure.</li>
+</ul>
+
+<h2>Where the data goes</h2>
+<ul>
+  <li><strong>Locally:</strong> IndexedDB inside your browser profile, and (optionally) the local receiver's SQLite database plus screenshot files.</li>
+  <li><strong>Your receiver:</strong> event, screenshot, insight, and session records go to the endpoint you configure. Use <code>VAIA_TOKEN</code> to require a shared token on every request when your receiver is reachable beyond localhost.</li>
+  <li><strong>Your vision provider:</strong> if you enable AI analysis, captured screenshots are sent to the provider you choose (NVIDIA NIM, OpenAI, Anthropic, Gemini, Groq, OpenRouter, or a local Ollama). That provider processes the images under its own privacy policy. With the built-in mock provider, nothing leaves your machine.</li>
+</ul>
+<p>The extension's publisher never receives any of this data.</p>
+
+<h2>What is protected by design</h2>
+<ul>
+  <li>Password, credit-card, and similar sensitive fields are detected and their values are masked before storage.</li>
+  <li>Screenshots are dropped by default on pages detected as sensitive.</li>
+  <li>Host denylist/allowlist lets you exclude or restrict which sites are monitored.</li>
+  <li><code>dataRetentionDays</code> auto-prunes stored data.</li>
+  <li>Every sync channel (events, screenshots, insights) can be switched off.</li>
+</ul>
+
+<h2>Chrome Web Store permission disclosures</h2>
+<ul>
+  <li><code>tabs</code>, <code>windows</code> — read active-tab URL/title to record page views and attention time; list and focus tabs on request.</li>
+  <li><code>scripting</code> + <code>host_permissions: &lt;all_urls&gt;</code> — inject the activity recorder and DOM-analysis helpers into the pages you browse, on any site, so tracking and analysis work everywhere you enable them.</li>
+  <li><code>webNavigation</code> — detect page loads and navigations for session and attention accounting.</li>
+  <li><code>alarms</code> — schedule periodic captures, flushes, and scheduled tasks.</li>
+  <li><code>notifications</code> — surface agent notifications you request.</li>
+  <li><code>downloads</code> — save files when you invoke the download ability.</li>
+  <li><code>storage</code>, <code>unlimitedStorage</code> — store your settings and the local offline archive.</li>
+  <li><code>offscreen</code> documents — re-encode screenshots without visible UI.</li>
+</ul>
+
+<h2>Data retention and deletion</h2>
+<p>Data lives only in the locations listed above until you delete it: uninstall the extension, clear the extension's storage, delete the receiver's <code>data/</code> directory (or your <code>VAIA_DATA_DIR</code>), or set <code>dataRetentionDays</code> to prune automatically.</p>
+
+<h2>Changes</h2>
+<p>Material changes to this policy will be reflected in the extension's changelog and on this page with an updated date.</p>
+
+<h2>Contact</h2>
+<p>Open an issue at the project repository for any privacy question or data request.</p>
+</body>
+</html>
