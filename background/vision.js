@@ -14,7 +14,10 @@ import { now } from '../shared/utils.js';
 
 /** Per-provider fallback chains, cheapest/smallest first. */
 const FALLBACK_MODELS = {
-  nvidia: ['meta/llama-3.2-11b-vision-instruct', 'meta/llama-3.2-90b-vision-instruct'],
+  // nvidia: 90b is deliberately NOT in the chain — it hangs indefinitely on
+  // some NIM accounts (measured: zero bytes in 150s while 11b answers in <10s),
+  // so a fallback attempt would stall captures. It stays user-selectable.
+  nvidia: ['meta/llama-3.2-11b-vision-instruct'],
   openai: ['gpt-4o-mini', 'gpt-4o'],
   anthropic: ['claude-sonnet-4-5'],
   gemini: ['gemini-2.5-flash'],
