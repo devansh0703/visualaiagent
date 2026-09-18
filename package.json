@@ -1,6 +1,6 @@
 {
   "name": "visual-ai-agent",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "A Visual AI Agent Chrome extension: monitors the browser screen and user activity, analyzes it with vision LLMs, and streams telemetry to your database.",
   "type": "module",
   "license": "MIT",

@@ -1,7 +1,7 @@
 /**
  * vision.js — vision-language analysis of captured screenshots across multiple
- * providers: OpenAI, Anthropic, Google Gemini, OpenRouter, Ollama and a local
- * mock (no key / offline). Every provider is asked to return the same JSON
+ * providers: NVIDIA NIM, OpenAI, Anthropic, Google Gemini, OpenRouter, Ollama
+ * and a local mock (no key / offline). Every provider is asked to return the same JSON
  * schema, which we parse defensively.
  *
  * Model strategy: `vision.autoModel` (default on) auto-discovers the SMALLEST
@@ -14,6 +14,7 @@ import { now } from '../shared/utils.js';
 
 /** Per-provider fallback chains, cheapest/smallest first. */
 const FALLBACK_MODELS = {
+  nvidia: ['meta/llama-3.2-11b-vision-instruct', 'meta/llama-3.2-90b-vision-instruct'],
   openai: ['gpt-4o-mini', 'gpt-4o'],
   anthropic: ['claude-sonnet-4-5'],
   gemini: ['gemini-2.5-flash'],
@@ -324,6 +325,11 @@ async function callProvider({ provider, model, baseUrl, apiKey, system, user, te
       return openaiCompatible({ model, baseUrl: baseUrl || 'https://openrouter.ai/api/v1', apiKey, messages, temperature, maxTokens, timeoutMs });
     case 'groq':
       return openaiCompatible({ model, baseUrl: baseUrl || 'https://api.groq.com/openai/v1', apiKey, messages, temperature, maxTokens, timeoutMs, responseFormat: false });
+    case 'nvidia':
+      // NVIDIA NIM (integrate.api.nvidia.com) is OpenAI-wire-compatible. The
+      // catalog's vision models don't reliably accept response_format, so it's
+      // opt-out — output is parsed defensively via extractJSON anyway.
+      return openaiCompatible({ model, baseUrl: baseUrl || 'https://integrate.api.nvidia.com/v1', apiKey, messages, temperature, maxTokens, timeoutMs, responseFormat: false });
     case 'openai':
     default:
       return openaiCompatible({ model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, responseFormat });

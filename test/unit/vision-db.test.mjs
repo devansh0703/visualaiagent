@@ -60,6 +60,15 @@ test('baseOf derives screenshot endpoint base', () => {
   assert.equal(baseOf(''), '');
 });
 
+test('nvidia is the default vision provider with a default model', () => {
+  const providers = visionProviders();
+  const nvidia = providers.find((p) => p.id === 'nvidia');
+  assert.ok(nvidia, 'nvidia provider should be registered');
+  assert.equal(nvidia.needsKey, true);
+  assert.equal(defaultModels().nvidia, 'meta/llama-3.2-11b-vision-instruct');
+  assert.equal(providers[0].id, 'nvidia', 'nvidia should be listed first');
+});
+
 test('groq is a registered vision provider with a default model', () => {
   const providers = visionProviders();
   const groq = providers.find((p) => p.id === 'groq');

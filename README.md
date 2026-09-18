@@ -25,7 +25,8 @@ single, local-first, privacy-respecting extension you fully control.
 - Captures the visible tab, re-encodes it through an offscreen document, and
   sends it to a vision model for scene analysis (what's on screen, likely user
   intent, UI issues)
-- Providers: **OpenAI**, **Anthropic**, **Gemini**, **Groq**, **OpenRouter**,
+- Providers: **NVIDIA NIM** (default, OpenAI-compatible Llama vision),
+  **OpenAI**, **Anthropic**, **Gemini**, **Groq**, **OpenRouter**,
   **Ollama** (local), plus an offline **mock** provider for development
 - Capture triggers: periodic, on significant events (click/nav/error), manual
 
@@ -174,7 +175,7 @@ See `shared/config.js` for defaults. Key sections (editable in Options):
 | `tracking.*` | Toggle mouse/keyboard/scroll/navigation/errors |
 | `capture.enabled` | Screen capture on/off; interval, quality, maxWidth |
 | `capture.storeLocal` | Keep frames locally for replay (default on) |
-| `vision.provider` | `openai` / `anthropic` / `gemini` / `groq` / `openrouter` / `ollama` / `mock` |
+| `vision.provider` | `nvidia` / `openai` / `anthropic` / `gemini` / `groq` / `openrouter` / `ollama` / `mock` |
 | `vision.apiKey` | Provider key (stored in `chrome.storage.local`) |
 | `db.endpoint` | Receiver URL for events (e.g. `http://localhost:8787/api/events`) |
 | `db.sendEvents` / `sendScreenshots` / `sendInsights` | Per-channel sync toggles |
@@ -215,7 +216,7 @@ background/service-worker.js orchestrator: routing, sessions, tabs, flushing
 background/agent.js         agentic layer: page reports + computer-use task loop
 background/abilities.js     the 73-skill ability registry + chatbot history
 background/capture.js       capture pipeline (offscreen re-encode)
-background/vision.js        6 vision providers + offline mock
+background/vision.js        7 vision providers + offline mock
 background/insights.js      heuristic detectors + LLM summaries
 background/db.js            IndexedDB outbound queue, retry/backoff/dedup
 background/idb.js           IndexedDB store layer (also offline archive)
@@ -233,7 +234,7 @@ HTTP.
 
 ```bash
 npm test            # 139 unit tests (config, utils, element-tools, session, insights, vision, db, agent, abilities, mcp)
-npm run test:integration  # live provider checks — skips without keys
+npm run test:integration  # live provider checks — skips without keys (NVIDIA_API_KEY or GROQ_API_KEY)
 npm run e2e   # loads the real extension in headless Chrome (puppeteer-core +
               #   system Chrome), drives the /demo page, and verifies tracking,
               #   redaction, capture, vision, agent page-reports + task loop,
@@ -242,9 +243,10 @@ npm run e2e   # loads the real extension in headless Chrome (puppeteer-core +
               #   full receiver round-trip
 ```
 
-The live integration test runs against **Groq** when `GROQ_API_KEY` is set
-(see `.env.example`). Note that Groq's free on-demand tier is token-limited
-and vision requests are token-heavy, so keep `vision.maxTokens` modest.
+The live integration test runs against **NVIDIA NIM** when `NVIDIA_API_KEY` is set
+(e.g. exported in `~/.bashrc`), falling back to **Groq** when `GROQ_API_KEY` is set
+(see `.env.example`). Note that free tiers are token-limited and vision requests
+are token-heavy, so keep `vision.maxTokens` modest.
 
 E2E uses Chrome 137+ `Extensions.loadUnpacked` via puppeteer's
 `installExtension()` because branded Chrome builds removed `--load-extension`.

@@ -1,11 +1,13 @@
 /**
- * test/integration/vision-groq.mjs — live test of the Groq vision provider.
+ * test/integration/vision-groq.mjs — live tests of the NVIDIA NIM and Groq
+ * vision providers.
  *
- * Skips (passes) when GROQ_API_KEY is not available, so it is safe to run in CI.
- * Generate a key at https://console.groq.com and set it as an environment
- * variable or in a local .env file (gitignored).
+ * Skips (passes) when the matching API key is not available, so it is safe to
+ * run in CI. NVIDIA NIM keys live at https://build.nvidia.org — the extension
+ * defaults to `nvidia` and reads NVIDIA_API_KEY from the environment (or a
+ * gitignored .env file).
  *
- * Run: GROQ_API_KEY=gsk_… npm run test:integration
+ * Run: NVIDIA_API_KEY=nvapi-… npm run test:integration
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,6 +31,7 @@ function loadEnv() {
 loadEnv();
 
 const API_KEY = process.env.GROQ_API_KEY || '';
+const NVIDIA_KEY = process.env.NVIDIA_API_KEY || '';
 
 /** Build a small valid PNG (solid color) as a data URL — enough for vision. */
 function tinyPngDataUrl(width = 32, height = 32, [r, g, b] = [0, 120, 215]) {
@@ -74,6 +77,36 @@ function tinyPngDataUrl(width = 32, height = 32, [r, g, b] = [0, 120, 215]) {
   ]);
   return `data:image/png;base64,${png.toString('base64')}`;
 }
+
+test('nvidia provider analyzes a screenshot with a real API key', { skip: !NVIDIA_KEY ? 'NVIDIA_API_KEY not set — skipping live provider test' : false }, async () => {
+  // Uses the extension's own defaults: provider `nvidia` (OpenAI-compatible
+  // NIM endpoint) and model meta/llama-3.2-11b-vision-instruct.
+  const run = () =>
+    analyze({
+      config: { vision: { provider: 'nvidia', apiKey: NVIDIA_KEY, enabled: true, maxTokens: 512 } },
+      context: {
+        url: 'https://example.com',
+        title: 'Integration test',
+        dataUrl: tinyPngDataUrl(),
+        recentEvents: [{ type: 'click', summary: 'clicked login' }],
+      },
+    });
+  let result;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      result = await run();
+      break;
+    } catch (e) {
+      if (!/429/.test(e.message) || attempt === 3) throw e;
+      await new Promise((r) => setTimeout(r, 25000));
+    }
+  }
+  assert.equal(result.provider, 'nvidia');
+  assert.ok(result.summary, 'should have a summary');
+  assert.ok(typeof result.raw?.screen?.summary === 'string');
+  assert.ok(result.model, 'should report the model used');
+  console.log(`[nvidia] model=${result.model} summary=${JSON.stringify(result.summary).slice(0, 120)}`);
+});
 
 test('groq provider analyzes a screenshot with a real API key', { skip: !API_KEY ? 'GROQ_API_KEY not set — skipping live provider test' : false }, async () => {
   // Groq's free on_demand tier is token-rate-limited and vision requests are
