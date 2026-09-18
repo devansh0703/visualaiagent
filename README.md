@@ -233,7 +233,7 @@ HTTP.
 ## Testing
 
 ```bash
-npm test            # 139 unit tests (config, utils, element-tools, session, insights, vision, db, agent, abilities, mcp)
+npm test            # 140 unit tests (config, utils, element-tools, session, insights, vision, db, agent, abilities, mcp)
 npm run test:integration  # live provider checks — skips without keys (NVIDIA_API_KEY or GROQ_API_KEY)
 npm run e2e   # loads the real extension in headless Chrome (puppeteer-core +
               #   system Chrome), drives the /demo page, and verifies tracking,

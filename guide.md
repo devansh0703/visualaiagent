@@ -108,8 +108,9 @@ The extension works as pure telemetry out of the box. For the "visual AI" layer:
 ## Running the test suite
 
 ```bash
-npm test                 # 139 unit tests
-npm run test:integration # live provider test (skips without GROQ_API_KEY)
+npm test                 # 140 unit tests
+npm run test:integration # live provider tests (skips without NVIDIA_API_KEY
+                         #   or GROQ_API_KEY)
 npm run e2e              # headless-Chrome E2E: loads the extension, drives /demo,
                          # verifies events land in the database
 ```
