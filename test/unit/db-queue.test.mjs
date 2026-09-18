@@ -33,7 +33,9 @@ const idbMock = {
   },
 };
 
-mock.module('file:///home/devansh/visualaiagent/background/idb.js', { namedExports: idbMock });
+// Resolve the mock key like a normal import from this file so the test is
+// portable (a hardcoded home path only worked on one machine and broke CI).
+mock.module('../../background/idb.js', { namedExports: idbMock });
 
 const { initDb, enqueue, flushNow, cancelScheduler } = await import('../../background/db.js');
 
