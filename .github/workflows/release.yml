@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Package extension zip
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p dist/vaia
+          cp -r manifest.json _locales background content offscreen icons ui shared dist/vaia/
+          cd dist && zip -r "vaia-${VERSION}.zip" vaia && cd ..
+
+      - name: Create GitHub release with the zip
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/vaia-*.zip
+          generate_release_notes: true
