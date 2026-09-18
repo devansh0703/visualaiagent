@@ -30,6 +30,9 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Vision schema eval (offline)
+        run: npm run evals
+
       - name: Integration tests (skips without API keys)
         run: npm run test:integration
         env:
