@@ -172,8 +172,8 @@ input:focus,select:focus{outline:none;background:var(--yellow)}
     <span class="sub" id="sub"></span>
     <span class="live">LIVE</span>
     <span class="grow"></span>
-    <a href="/api/export?format=json" id="btnJson" class="btn cyan">Export JSON</a>
-    <a href="/api/export?format=csv" id="btnCsv" class="btn lime">Export CSV</a>
+    <button id="btnJson" class="btn cyan">Export JSON</button>
+    <button id="btnCsv" class="btn lime">Export CSV</button>
     <button id="btnRefresh" class="btn pink">REFRESH</button>
   </header>
 
@@ -189,7 +189,7 @@ input:focus,select:focus{outline:none;background:var(--yellow)}
       <h2>Event mix</h2>
       <span class="chip ink">by type</span>
       <span class="grow"></span>
-      <a href="/api/heatmap" target="_blank" class="chip yellow mono">heatmap api &rarr;</a>
+      <button id="btnHeatApi" class="chip yellow mono" style="cursor:pointer;border:2px solid var(--ink)">heatmap api &rarr;</button>
     </div>
     <div class="bytype" id="byType"></div>
   </div>
@@ -277,9 +277,48 @@ let stats = null;
 let attentionData = null;
 let focusData = null;
 
+/* ---------- shared-token auth (receiver started with VAIA_TOKEN) ----------
+ * /health reports whether auth is required. The token lives in localStorage
+ * and is sent as x-api-key on every API call. Screenshots, exports and the
+ * heatmap download go through blob URLs so the token never appears in a page
+ * URL, an <img src>, or a new tab. Without VAIA_TOKEN on the receiver all of
+ * this is pass-through, matching the open-local-dev mode. */
+let AUTH_REQUIRED = false;
+let lastPromptAt = 0;
+
+async function probeAuth() {
+  try {
+    const h = await (await fetch('/health')).json();
+    AUTH_REQUIRED = !!h.authRequired;
+  } catch { AUTH_REQUIRED = false; }
+}
+function token() { return localStorage.getItem('vaia_token') || ''; }
+function hasToken() { return !AUTH_REQUIRED || !!token(); }
+function authHeaders() { return hasToken() ? { 'x-api-key': token() } : {}; }
+
+function promptToken() {
+  if (Date.now() - lastPromptAt < 60000) return token(); // throttle: max 1 prompt/min
+  lastPromptAt = Date.now();
+  const t = prompt('This receiver requires an access token.\nEnter the VAIA_TOKEN value:');
+  if (t != null && t.trim()) localStorage.setItem('vaia_token', t.trim());
+  return token();
+}
+
 async function get(url) {
-  const r = await fetch(url);
+  const r = await fetch(url, { headers: authHeaders() });
+  if (r.status === 401) {
+    promptToken();
+    throw new Error(hasToken() ? 'unauthorized — token rejected' : 'unauthorized — token required');
+  }
+  if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
+}
+
+async function blobUrl(url) {
+  const r = await fetch(url, { headers: authHeaders() });
+  if (r.status === 401) { promptToken(); throw new Error('unauthorized'); }
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return URL.createObjectURL(await r.blob());
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function ts(t) { return t ? new Date(t).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'; }
@@ -504,14 +543,22 @@ async function renderSessions() {
   }).join('') || '<tr><td colspan="7"><div class="empty">no sessions</div></td></tr>';
 }
 
+let shotObjectUrls = [];
 async function renderShots() {
   const res = await get('/api/screenshots?limit=60');
   const rows = res.rows || [];
-  $('shotsBody').innerHTML = rows.map((r)=>{
-    const file = (r.path||'').split('/').pop();
-    const src = '/shots/' + encodeURIComponent(file);
-    return `<figure><img src="${src}" loading="lazy" onclick="openLb('${src}')" /><figcaption>${ts(r.ts)} \u00b7 ${esc(r.reason||'')}</figcaption></figure>`;
-  }).join('') || '<div class="empty">no screenshots yet</div>';
+  for (const u of shotObjectUrls) URL.revokeObjectURL(u);
+  shotObjectUrls = [];
+  const figures = [];
+  for (const r of rows) {
+    const file = (r.path || '').split('/').pop();
+    try {
+      const src = await blobUrl('/shots/' + encodeURIComponent(file));
+      shotObjectUrls.push(src);
+      figures.push(`<figure><img src="${src}" loading="lazy" onclick="openLb('${src}')" /><figcaption>${ts(r.ts)} \u00b7 ${esc(r.reason||'')}</figcaption></figure>`);
+    } catch {}
+  }
+  $('shotsBody').innerHTML = figures.join('') || '<div class="empty">no screenshots yet</div>';
 }
 
 async function renderHeatmap() {
@@ -550,6 +597,9 @@ $('tabs').querySelectorAll('button').forEach((b)=>{
 });
 
 async function refresh() {
+  if (!AUTH_REQUIRED) await probeAuth();
+  if (!hasToken()) promptToken();
+  if (!hasToken()) { $('sub').textContent = 'waiting for access token…'; return; }
   try {
     stats = await get('/api/stats');
     attentionData = await get('/api/attention?hours=24');
@@ -562,6 +612,22 @@ async function refresh() {
   } catch (e) { $('sub').textContent = 'dashboard error: '+e.message; }
 }
 $('btnRefresh').addEventListener('click', refresh);
+async function downloadExport(format) {
+  try {
+    const url = await blobUrl('/api/export?format=' + format);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'vaia-export-' + new Date().toISOString().slice(0, 10) + '.' + format;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch (e) { $('sub').textContent = 'export: ' + e.message; }
+}
+$('btnJson').addEventListener('click', () => downloadExport('json'));
+$('btnCsv').addEventListener('click', () => downloadExport('csv'));
+$('btnHeatApi').addEventListener('click', async () => {
+  try { window.open(await blobUrl('/api/heatmap'), '_blank'); }
+  catch (e) { $('sub').textContent = 'heatmap: ' + e.message; }
+});
 refresh();
 setInterval(refresh, 15000);
 </script>
