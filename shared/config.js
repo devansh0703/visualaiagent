@@ -48,7 +48,7 @@ export const DEFAULTS = {
 
   vision: {
     enabled: false,
-    provider: 'openai',
+    provider: 'nvidia',
     model: '',
     apiKey: '',
     baseUrl: '',
@@ -161,6 +161,7 @@ export function normalizeConfig(stored) {
 /** @returns {Array<{id:string,label:string,needsKey:boolean}>} */
 export function visionProviders() {
   return [
+    { id: 'nvidia', label: 'NVIDIA NIM (Llama vision)', needsKey: true },
     { id: 'openai', label: 'OpenAI (GPT-4o / o-series)', needsKey: true },
     { id: 'anthropic', label: 'Anthropic (Claude)', needsKey: true },
     { id: 'gemini', label: 'Google Gemini', needsKey: true },
@@ -173,6 +174,7 @@ export function visionProviders() {
 
 export function defaultModels() {
   return {
+    nvidia: 'meta/llama-3.2-11b-vision-instruct',
     openai: 'gpt-4o',
     anthropic: 'claude-sonnet-4-5',
     gemini: 'gemini-2.5-flash',
