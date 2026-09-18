@@ -101,7 +101,7 @@ test('buildModelCandidates honors explicit model with autoModel off', async () =
 
 test('buildModelCandidates appends groq fallback chain after default', async () => {
   const list = await buildModelCandidates({ autoModel: false }, 'groq');
-  assert.deepEqual(list, ['qwen/qwen3.6-27b']);
+  assert.deepEqual(list, ['qwen/qwen3.8-27b']);
 });
 
 test('buildModelCandidates dedupes when auto-discovered smallest already in fallbacks', async () => {
