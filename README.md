@@ -178,6 +178,7 @@ See `shared/config.js` for defaults. Key sections (editable in Options):
 | `vision.provider` | `nvidia` / `openai` / `anthropic` / `gemini` / `groq` / `openrouter` / `ollama` / `mock` |
 | `vision.apiKey` | Provider key (stored in `chrome.storage.local`) |
 | `db.endpoint` | Receiver URL for events (e.g. `http://localhost:8787/api/events`) |
+| `db.apiKey` | Shared token sent as `x-api-key` (set `VAIA_TOKEN` on the receiver to require it) |
 | `db.sendEvents` / `sendScreenshots` / `sendInsights` | Per-channel sync toggles |
 | `db.flushIntervalMs` | Auto-flush interval (default 5s) |
 | `privacy.redactKeystrokeValues` | Drop typed values entirely (default on) |
@@ -186,7 +187,11 @@ See `shared/config.js` for defaults. Key sections (editable in Options):
 ## Receiver API
 
 The bundled `server/server.mjs` (Node 24 `node:sqlite`) implements the wire
-format used by the extension:
+format used by the extension. Set `VAIA_TOKEN=<secret>` when starting it to
+require that token on every `/api/*` and `/shots/*` request (accepted as the
+`x-api-key` header — what the extension and dashboard send — `Authorization:
+Bearer`, or `?token=` for image tags). `VAIA_DATA_DIR` moves the SQLite DB and
+screenshots out of the repo.
 
 | Endpoint | Method | Body |
 | --- | --- | --- |
@@ -233,8 +238,10 @@ HTTP.
 ## Testing
 
 ```bash
-npm test            # 140 unit tests (config, utils, element-tools, session, insights, vision, db, agent, abilities, mcp)
+npm test            # 144 unit tests (config, utils, element-tools, session, insights, vision, db, agent, abilities, mcp, receiver auth)
 npm run test:integration  # live provider checks — skips without keys (NVIDIA_API_KEY or GROQ_API_KEY)
+npm run evals             # vision-output schema eval (offline, CI-safe)
+npm run evals:live        # + grounded image evals against the real default model
 npm run e2e   # loads the real extension in headless Chrome (puppeteer-core +
               #   system Chrome), drives the /demo page, and verifies tracking,
               #   redaction, capture, vision, agent page-reports + task loop,

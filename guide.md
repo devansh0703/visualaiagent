@@ -50,6 +50,21 @@ Right-click the toolbar icon → **Options** → **Database** section:
 - Leave **Send events / Send screenshots / Send insights** checked (default)
 - Click **Save settings**
 
+### Locking the receiver (recommended beyond localhost)
+
+By default the receiver is open on localhost — fine for development. If the
+port is reachable from your network (or you deploy the dashboard), restart it
+with a shared token:
+
+```bash
+VAIA_TOKEN=my-secret npm run server
+```
+
+Then paste the same value into Options → Database → **API key** (the extension
+sends it as `x-api-key`). The dashboard prompts for the token once and stores
+it in your browser's localStorage. Every `/api/*` and `/shots/*` request is
+rejected with 401 until the correct token is presented.
+
 Screenshots and insights are derived from this endpoint automatically
 (`/api/screenshots`, `/api/insights`), so one field is all you need.
 
@@ -108,9 +123,11 @@ The extension works as pure telemetry out of the box. For the "visual AI" layer:
 ## Running the test suite
 
 ```bash
-npm test                 # 140 unit tests
+npm test                 # 144 unit tests
 npm run test:integration # live provider tests (skips without NVIDIA_API_KEY
                          #   or GROQ_API_KEY)
+npm run evals            # vision-output schema eval (offline)
+npm run evals:live       # grounded image evals against the default model
 npm run e2e              # headless-Chrome E2E: loads the extension, drives /demo,
                          # verifies events land in the database
 ```
