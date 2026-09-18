@@ -2,7 +2,7 @@
 
 Manifest V3 Chrome extension + local receiver. Pure Node ESM, no build step, no runtime deps.
 
-- `npm test` — 139+ unit tests (`node --test`)
+- `npm test` — 140 unit tests (`node --test`)
 - `npm run test:integration` — live provider test (skips without a key)
 - `npm run e2e` — headless Chrome E2E (needs puppeteer-core + system Chrome)
 - `npm run server` — receiver + dashboard on :8787
