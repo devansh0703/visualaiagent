@@ -178,7 +178,7 @@ export function defaultModels() {
     openai: 'gpt-4o',
     anthropic: 'claude-sonnet-4-5',
     gemini: 'gemini-2.5-flash',
-    groq: 'qwen/qwen3.6-27b',
+    groq: 'qwen/qwen3.8-27b',
     openrouter: 'openai/gpt-4o',
     ollama: 'llama3.2-vision',
     mock: 'mock-vision',
