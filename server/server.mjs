@@ -12,9 +12,15 @@
  *
  * Storage: SQLite (node:sqlite, built into Node >= 22.5) + filesystem for images.
  * Run:  node server/server.mjs   (PORT env var to change port, default 8787)
+ *
+ * Auth: set VAIA_TOKEN to require a shared token on every /api/* and /shots/*
+ * request (x-api-key header, `Authorization: Bearer`, or `?token=` for <img>/
+ * download links). /health, / and /demo stay open so clients can discover and
+ * prompt. VAIA_DATA_DIR moves the SQLite DB + screenshots out of the repo.
  */
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
+import { timingSafeEqual } from 'node:crypto';
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +28,7 @@ import { attentionByHost, topHosts } from '../shared/attention.js';
 import { categoryOf, focusScoreOf } from '../shared/categories.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const DATA = join(ROOT, 'data');
+const DATA = process.env.VAIA_DATA_DIR || join(ROOT, 'data');
 const SHOTS = join(DATA, 'screenshots');
 mkdirSync(SHOTS, { recursive: true });
 const DASHBOARD_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'dashboard.html'), 'utf8');
@@ -100,9 +106,38 @@ function json(res, code, obj) {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, x-api-key',
+    'Access-Control-Allow-Headers': 'Content-Type, x-api-key, Authorization',
+    ...(code === 401 ? { 'WWW-Authenticate': 'Bearer' } : {}),
   });
   res.end(body);
+}
+
+/* ------------------------------ shared-token auth ------------------------ */
+
+const TOKEN = process.env.VAIA_TOKEN || '';
+
+function tokenMatches(provided) {
+  if (!TOKEN) return true;
+  if (!provided) return false;
+  const a = Buffer.from(String(provided));
+  const b = Buffer.from(TOKEN);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function requestAuthorized(req) {
+  if (!TOKEN) return true;
+  if (tokenMatches(req.headers['x-api-key'])) return true;
+  const auth = req.headers['authorization'] || '';
+  if (auth.startsWith('Bearer ') && tokenMatches(auth.slice(7).trim())) return true;
+  try {
+    const t = new URL(req.url, 'http://x').searchParams.get('token');
+    if (t && tokenMatches(t)) return true;
+  } catch {}
+  return false;
+}
+
+function isProtectedPath(url) {
+  return url.startsWith('/api/') || url === '/api' || url.startsWith('/shots/');
 }
 
 function readBody(req) {
@@ -376,7 +411,10 @@ setTimeout(() => { throw new Error('demo-unhandled'); }, 0);
 const server = createServer(async (req, res) => {
   const url = req.url.split('?')[0];
   if (req.method === 'OPTIONS') return json(res, 204, {});
-  if (req.method === 'GET' && url === '/health') return json(res, 200, { ok: true });
+  if (req.method === 'GET' && url === '/health') return json(res, 200, { ok: true, authRequired: !!TOKEN });
+  if (isProtectedPath(url) && !requestAuthorized(req)) {
+    return json(res, 401, { ok: false, error: 'unauthorized: this receiver requires the VAIA_TOKEN value as the x-api-key header (or Authorization: Bearer / ?token=)' });
+  }
   if (req.method === 'GET' && url === '/') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(DASHBOARD_HTML);
@@ -431,7 +469,10 @@ const server = createServer(async (req, res) => {
 
 const PORT = process.env.PORT || 8787;
 server.listen(PORT, () => {
-  console.log(`[vaia-receiver] listening on http://localhost:${PORT}`);
+  console.log(`[vaia-receiver] listening on http://localhost:${PORT}${TOKEN ? '  (auth: ON)' : '  (auth: OFF — set VAIA_TOKEN to require a token)'}`);
   console.log(`  demo page:   http://localhost:${PORT}/demo`);
   console.log(`  stats:       http://localhost:${PORT}/api/stats`);
 });
+
+// Exported for tests (the test sets PORT=0 and reads server.address().port).
+export { server };
